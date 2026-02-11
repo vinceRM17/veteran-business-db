@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+# Exclude databases by default but allow veteran_businesses.db
+*.sqlite
+*.sqlite3
+.DS_Store
+*.zip
+/venv/
+/.venv/
