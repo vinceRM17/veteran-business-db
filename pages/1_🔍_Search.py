@@ -4,6 +4,15 @@ from database import search_businesses, get_all_states, get_all_business_types, 
 st.set_page_config(page_title="Search - Veteran Business DB", layout="wide")
 create_tables()
 
+# Sidebar branding
+with st.sidebar:
+    st.markdown("""
+    <div style='text-align:center; padding: 0.5rem 0 1rem 0;'>
+        <h2 style='color: #c59a3e; margin-bottom: 0;'>🛡️ Veteran Business DB</h2>
+        <p style='color: #6c757d; font-size: 0.85rem;'>Active Heroes &bull; Shepherdsville, KY</p>
+    </div>
+    """, unsafe_allow_html=True)
+
 st.title("🔍 Search Businesses")
 
 # Filters
@@ -34,38 +43,49 @@ results = search_businesses(
 
 st.caption(f"{results['total']} businesses found")
 
-# Results table
+# Results
 for biz in results["businesses"]:
-    with st.container():
-        cols = st.columns([0.5, 3, 2, 1, 1])
+    bt = biz.get("business_type", "")
+    is_sdvosb = "Service Disabled" in bt
+    border_color = "#1565c0" if is_sdvosb else "#2e7d32" if bt else "#dee2e6"
+
+    with st.container(border=True):
+        # Colored accent bar
+        st.markdown(
+            f'<div style="border-top: 3px solid {border_color}; margin: -1rem -1rem 0.75rem -1rem;"></div>',
+            unsafe_allow_html=True,
+        )
+
+        cols = st.columns([0.5, 3, 2, 1, 1.5])
 
         dist = biz.get("distance_miles")
         cols[0].markdown(f"**{dist} mi**" if dist is not None else "—")
 
+        # Clickable business name using button + session state
         name = biz["legal_business_name"]
-        cols[1].markdown(f"**[{name}](/📋_Business_Detail?id={biz['id']})**")
+        if cols[1].button(name, key=f"biz_{biz['id']}"):
+            st.session_state.selected_business_id = biz["id"]
+            st.switch_page("pages/2_📋_Business_Detail.py")
         if biz.get("dba_name"):
             cols[1].caption(f"DBA: {biz['dba_name']}")
 
         location = f"{biz.get('city', '')}, {biz.get('state', '')} {biz.get('zip_code', '')}"
         cols[2].text(location)
 
-        bt = biz.get("business_type", "")
-        if "Service Disabled" in bt:
-            cols[3].markdown(":blue[SDVOSB]")
+        if is_sdvosb:
+            cols[3].markdown(":blue[**SDVOSB**]")
         elif bt:
-            cols[3].markdown(":green[VOB]")
+            cols[3].markdown(":green[**VOB**]")
 
-        has_contact = []
+        # Contact info - show phone if available
+        contact_parts = []
         if biz.get("phone"):
-            has_contact.append("📞")
+            contact_parts.append(f"📞 {biz['phone']}")
         if biz.get("email"):
-            has_contact.append("✉️")
+            contact_parts.append("✉️")
         if biz.get("website"):
-            has_contact.append("🌐")
-        cols[4].text(" ".join(has_contact) if has_contact else "⚠️")
-
-        st.divider()
+            contact_parts.append("🌐")
+        cols[4].markdown(" ".join(contact_parts) if contact_parts else "⚠️ No contact")
 
 # Pagination controls
 if results["total_pages"] > 1:

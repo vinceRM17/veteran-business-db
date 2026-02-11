@@ -5,6 +5,15 @@ from config import SAM_GOV_API_KEY
 st.set_page_config(page_title="Fetch Data - Veteran Business DB", layout="wide")
 create_tables()
 
+# Sidebar branding
+with st.sidebar:
+    st.markdown("""
+    <div style='text-align:center; padding: 0.5rem 0 1rem 0;'>
+        <h2 style='color: #c59a3e; margin-bottom: 0;'>🛡️ Veteran Business DB</h2>
+        <p style='color: #6c757d; font-size: 0.85rem;'>Active Heroes &bull; Shepherdsville, KY</p>
+    </div>
+    """, unsafe_allow_html=True)
+
 if not st.session_state.get("logged_in"):
     st.warning("Please log in from the Dashboard sidebar to access this page.")
     st.stop()
