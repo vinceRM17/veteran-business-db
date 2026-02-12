@@ -39,3 +39,24 @@ def is_within_radius(zip_code: str, radius=SEARCH_RADIUS_MILES):
     if dist is None:
         return False, None
     return dist <= radius, round(dist, 1)
+
+
+def compute_distances_from_point(origin_lat, origin_lon, businesses):
+    """Return copies of business dicts with custom_distance_miles added, sorted by distance."""
+    results = []
+    for biz in businesses:
+        lat, lon = biz.get("latitude"), biz.get("longitude")
+        if lat is None or lon is None:
+            continue
+        dist = round(haversine_miles(origin_lat, origin_lon, lat, lon), 1)
+        entry = dict(biz)
+        entry["custom_distance_miles"] = dist
+        results.append(entry)
+    results.sort(key=lambda b: b["custom_distance_miles"])
+    return results
+
+
+def filter_by_custom_radius(origin_lat, origin_lon, businesses, radius_miles):
+    """Compute distances from origin and return only those within radius_miles."""
+    with_distances = compute_distances_from_point(origin_lat, origin_lon, businesses)
+    return [b for b in with_distances if b["custom_distance_miles"] <= radius_miles]

@@ -2,7 +2,8 @@ import streamlit as st
 import pandas as pd
 import folium
 from streamlit_folium import st_folium
-from database import create_tables, get_stats, get_contact_stats, get_map_data
+from database import create_tables, get_stats, get_contact_stats, get_map_data, get_all_businesses_with_coords
+from geo import zip_to_coords, filter_by_custom_radius
 from config import ACTIVE_HEROES_LAT, ACTIVE_HEROES_LON
 
 st.set_page_config(
@@ -46,6 +47,10 @@ create_tables()
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
+# --- Selection state (shared across pages) ---
+if "selected_businesses" not in st.session_state:
+    st.session_state.selected_businesses = set()
+
 # --- Sidebar ---
 with st.sidebar:
     st.markdown("""
@@ -71,6 +76,14 @@ with st.sidebar:
                     st.rerun()
                 else:
                     st.error("Incorrect password")
+
+    # Selection badge
+    sel_count = len(st.session_state.selected_businesses)
+    if sel_count > 0:
+        st.divider()
+        st.markdown(f"**{sel_count} business{'es' if sel_count != 1 else ''} selected**")
+        if st.button("View Report", key="sidebar_report"):
+            st.switch_page("pages/5_📊_Report.py")
 
 # --- Dashboard Header ---
 st.markdown("""
@@ -109,21 +122,72 @@ st.markdown("")  # spacer
 
 # --- Map Hero Section ---
 st.subheader("Business Locations")
+
+# Default HQ-based distance filter
 dist_filter = st.select_slider(
-    "Distance Filter",
+    "Distance from HQ",
     options=[25, 50, 75, 100],
     value=100,
     format_func=lambda x: f"{x} miles",
 )
 
-data = get_map_data(max_distance=dist_filter)
+# Custom location toggle for map
+map_custom_location = st.toggle("Search from a different location", key="map_custom_location")
+
+map_center_lat = ACTIVE_HEROES_LAT
+map_center_lon = ACTIVE_HEROES_LON
+map_custom_zip = None
+distance_key = "distance_miles"
+distance_from_label = "HQ"
+using_custom = False
+
+if map_custom_location:
+    mc_col1, mc_col2 = st.columns([1, 2])
+    with mc_col1:
+        map_custom_zip = st.text_input("Zip Code", max_chars=5, placeholder="e.g. 40202", key="map_zip")
+    with mc_col2:
+        map_custom_radius = st.slider("Radius (miles)", min_value=10, max_value=250, value=50, step=5, key="map_radius")
+
+    if map_custom_zip and len(map_custom_zip) == 5 and map_custom_zip.isdigit():
+        clat, clon = zip_to_coords(map_custom_zip)
+        if clat is not None:
+            map_center_lat = clat
+            map_center_lon = clon
+            using_custom = True
+            distance_key = "custom_distance_miles"
+            distance_from_label = map_custom_zip
+        else:
+            st.warning(f"Could not find coordinates for zip code {map_custom_zip}.")
+    elif map_custom_zip:
+        st.warning("Please enter a valid 5-digit zip code.")
+
+# Fetch data based on mode
+if using_custom:
+    all_biz = get_all_businesses_with_coords()
+    data = filter_by_custom_radius(map_center_lat, map_center_lon, all_biz, map_custom_radius)
+else:
+    data = get_map_data(max_distance=dist_filter)
 
 if data:
     m = folium.Map(
-        location=[ACTIVE_HEROES_LAT, ACTIVE_HEROES_LON],
+        location=[map_center_lat, map_center_lon],
         zoom_start=8,
         tiles="CartoDB positron",
     )
+
+    # Custom location marker (when searching from a different location)
+    if using_custom:
+        folium.Marker(
+            location=[map_center_lat, map_center_lon],
+            popup=folium.Popup(
+                f"<div style='font-family: sans-serif;'>"
+                f"<b style='font-size: 14px;'>Search Location</b><br>"
+                f"<span style='color: #5a6c7d;'>Zip: {map_custom_zip}</span>"
+                f"</div>",
+                max_width=250,
+            ),
+            icon=folium.Icon(color="blue", icon="home", prefix="fa"),
+        ).add_to(m)
 
     # Active Heroes HQ marker
     folium.Marker(
@@ -148,7 +212,7 @@ if data:
 
         name = biz["legal_business_name"]
         city_state = f"{biz.get('city', '')}, {biz.get('state', '')}"
-        dist = biz.get("distance_miles")
+        dist = biz.get(distance_key)
         lat, lng = biz["latitude"], biz["longitude"]
 
         # Store mapping for click detection
@@ -163,7 +227,7 @@ if data:
         popup_lines.append(f"<span style='color: #5a6c7d;'>{city_state}</span>")
         popup_lines.append(f"<span style='background: {color}; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px;'>{type_label}</span>")
         if dist is not None:
-            popup_lines.append(f"<span style='color: #7a8a99;'>{dist} mi from HQ</span>")
+            popup_lines.append(f"<span style='color: #7a8a99;'>{dist} mi from {distance_from_label}</span>")
         if biz.get("phone"):
             popup_lines.append(f"📞 {biz['phone']}")
         if biz.get("email"):
@@ -187,15 +251,37 @@ if data:
         ).add_to(m)
 
     map_data = st_folium(m, use_container_width=True, height=500)
-    st.caption(f"Showing {len(data)} businesses  |  🟢 VOB  |  🔵 SDVOSB  |  ⭐ Active Heroes HQ  — click a marker for details")
 
-    # Handle marker click — navigate to business detail
+    sel_count = len(st.session_state.selected_businesses)
+    caption = f"Showing {len(data)} businesses  |  🟢 VOB  |  🔵 SDVOSB  |  ⭐ Active Heroes HQ"
+    if using_custom:
+        caption += f"  |  🏠 Search from {map_custom_zip}"
+    if sel_count > 0:
+        caption += f"  |  **{sel_count} selected for report**"
+    st.caption(caption)
+
+    # Handle marker click — show action panel
     if map_data and map_data.get("last_object_clicked"):
         clicked = map_data["last_object_clicked"]
         clicked_key = (round(clicked["lat"], 5), round(clicked["lng"], 5))
         if clicked_key in coord_to_id:
-            st.session_state.selected_business_id = coord_to_id[clicked_key]
-            st.switch_page("pages/_Business_Detail.py")
+            clicked_id = coord_to_id[clicked_key]
+            clicked_biz = next((b for b in data if b["id"] == clicked_id), None)
+            if clicked_biz:
+                with st.container(border=True):
+                    c1, c2, c3 = st.columns([3, 1, 1])
+                    c1.markdown(f"**{clicked_biz['legal_business_name']}** — {clicked_biz.get('city', '')}, {clicked_biz.get('state', '')}")
+                    if c2.button("View Details", key="map_detail"):
+                        st.session_state.selected_business_id = clicked_id
+                        st.switch_page("pages/_Business_Detail.py")
+                    if clicked_id in st.session_state.selected_businesses:
+                        if c3.button("Remove from Report", key="map_remove"):
+                            st.session_state.selected_businesses.discard(clicked_id)
+                            st.rerun()
+                    else:
+                        if c3.button("Add to Report", key="map_add"):
+                            st.session_state.selected_businesses.add(clicked_id)
+                            st.rerun()
 else:
     st.info("No businesses with coordinates to display on map.")
 

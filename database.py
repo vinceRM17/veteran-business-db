@@ -335,6 +335,21 @@ def get_business_by_id(business_id):
     return dict(row) if row else None
 
 
+def get_businesses_by_ids(ids):
+    if not ids:
+        return []
+    conn = get_connection()
+    cursor = conn.cursor()
+    placeholders = ",".join("?" for _ in ids)
+    cursor.execute(
+        f"SELECT * FROM businesses WHERE id IN ({placeholders}) ORDER BY distance_miles ASC, legal_business_name ASC",
+        list(ids),
+    )
+    rows = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
 def get_map_data(max_distance=None):
     conn = get_connection()
     cursor = conn.cursor()
@@ -357,6 +372,19 @@ def get_map_data(max_distance=None):
             WHERE latitude IS NOT NULL AND longitude IS NOT NULL
         """)
 
+    rows = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def get_all_businesses_with_coords():
+    """Fetch all businesses that have coordinates, for custom-location search."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT * FROM businesses
+        WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+    """)
     rows = [dict(row) for row in cursor.fetchall()]
     conn.close()
     return rows
