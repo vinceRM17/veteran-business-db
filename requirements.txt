@@ -4,3 +4,5 @@ streamlit>=1.30.0
 pandas>=2.0.0
 folium>=0.15.0
 streamlit-folium>=0.18.0
+duckduckgo-search>=7.0.0
+beautifulsoup4>=4.12.0

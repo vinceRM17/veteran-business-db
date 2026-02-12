@@ -299,5 +299,108 @@ def run_enrichment():
     print(f"  Website: {websites}/{total_biz}")
 
 
+def run_enrichment_batch(batch_size=50, callback=None):
+    """Enrich a batch of businesses missing contact info.
+
+    Args:
+        batch_size: Max number of businesses to process.
+        callback: Optional callable(message, progress_pct) for UI updates.
+
+    Returns:
+        dict with keys: enriched, skipped, total_processed
+    """
+    create_tables()
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT id, legal_business_name, city, state
+        FROM businesses
+        WHERE (phone IS NULL OR phone = '')
+          AND (email IS NULL OR email = '')
+          AND (website IS NULL OR website = '')
+        ORDER BY distance_miles ASC
+        LIMIT ?
+    """, (batch_size,))
+    businesses = cursor.fetchall()
+    conn.close()
+
+    total = len(businesses)
+    if callback:
+        callback(f"Found {total} businesses to enrich...", 0.0)
+
+    enriched = 0
+    skipped = 0
+
+    for i, biz in enumerate(businesses):
+        name = biz["legal_business_name"]
+        city = biz["city"]
+        state = biz["state"]
+        progress = (i + 1) / total if total else 1.0
+
+        if callback:
+            callback(f"[{i+1}/{total}] {name}, {city} {state}", progress * 0.95)
+
+        try:
+            info = enrich_business(biz["id"], name, city, state)
+        except Exception:
+            skipped += 1
+            time.sleep(3)
+            continue
+
+        if info is None:
+            skipped += 1
+            time.sleep(2)
+            continue
+
+        found = []
+        if info["phone"]:
+            found.append("phone")
+        if info["email"]:
+            found.append("email")
+        if info["website"]:
+            found.append("website")
+        if info["socials"]:
+            found.append("social")
+
+        if found:
+            conn = get_connection()
+            cursor = conn.cursor()
+
+            existing_notes = ""
+            cursor.execute("SELECT notes FROM businesses WHERE id = ?", (biz["id"],))
+            row = cursor.fetchone()
+            if row and row["notes"]:
+                existing_notes = row["notes"]
+
+            notes = existing_notes
+            if info["socials"]:
+                social_note = f"Social: {info['socials']}"
+                if social_note not in (notes or ""):
+                    notes = f"{notes}\n{social_note}".strip() if notes else social_note
+
+            cursor.execute("""
+                UPDATE businesses
+                SET phone = CASE WHEN phone IS NULL OR phone = '' THEN ? ELSE phone END,
+                    email = CASE WHEN email IS NULL OR email = '' THEN ? ELSE email END,
+                    website = CASE WHEN website IS NULL OR website = '' THEN ? ELSE website END,
+                    notes = ?
+                WHERE id = ?
+            """, (info["phone"], info["email"], info["website"], notes, biz["id"]))
+
+            conn.commit()
+            conn.close()
+            enriched += 1
+        else:
+            skipped += 1
+
+        time.sleep(2)
+
+    if callback:
+        callback("Enrichment complete!", 1.0)
+
+    return {"enriched": enriched, "skipped": skipped, "total_processed": total}
+
+
 if __name__ == "__main__":
     run_enrichment()

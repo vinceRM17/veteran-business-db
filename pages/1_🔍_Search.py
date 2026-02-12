@@ -1,5 +1,6 @@
 import streamlit as st
-from database import search_businesses, get_all_states, get_all_business_types, get_all_businesses_with_coords, create_tables
+import pandas as pd
+from database import search_businesses, export_search_to_csv, get_all_states, get_all_business_types, get_all_businesses_with_coords, create_tables
 from geo import zip_to_coords, filter_by_custom_radius
 
 st.set_page_config(page_title="Search | Veteran Business Directory", page_icon="🎖️", layout="wide")
@@ -151,7 +152,41 @@ else:
     if not custom_location:
         st.session_state.pop("report_custom_origin", None)
 
-st.caption(f"{results['total']} businesses found")
+dl_col1, dl_col2 = st.columns([3, 1])
+dl_col1.caption(f"{results['total']} businesses found")
+
+if results["total"] > 0:
+    # Build export data: custom location uses in-memory list, default uses DB query
+    if custom_location and custom_origin_lat is not None:
+        export_rows = filtered
+    else:
+        export_rows = export_search_to_csv(
+            query=query, state=state, business_type=biz_type,
+            max_distance=max_distance,
+        )
+
+    export_df = pd.DataFrame(export_rows)
+    # Keep useful columns in a clean order
+    export_cols = [
+        c for c in [
+            "legal_business_name", "dba_name", "business_type",
+            "physical_address_line1", "city", "state", "zip_code",
+            "phone", "email", "website",
+            "naics_codes", "naics_descriptions",
+            "distance_miles", "source", "notes",
+        ] if c in export_df.columns
+    ]
+    if custom_location and "custom_distance_miles" in export_df.columns:
+        export_cols.insert(export_cols.index("distance_miles") if "distance_miles" in export_cols else 0,
+                           "custom_distance_miles")
+    export_df = export_df[export_cols]
+
+    dl_col2.download_button(
+        f"Download CSV ({len(export_rows)})",
+        data=export_df.to_csv(index=False),
+        file_name="veteran_businesses_filtered.csv",
+        mime="text/csv",
+    )
 
 # Results
 for biz in results["businesses"]:

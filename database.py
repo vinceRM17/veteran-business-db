@@ -577,6 +577,45 @@ def search_businesses(query="", state="", business_type="", max_distance=None,
     }
 
 
+def export_search_to_csv(query="", state="", business_type="", max_distance=None):
+    """Return all matching businesses (no pagination) for CSV export."""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    conditions = []
+    params = []
+
+    if query:
+        conditions.append(
+            "(legal_business_name LIKE ? OR dba_name LIKE ? OR naics_descriptions LIKE ? OR city LIKE ?)"
+        )
+        q = f"%{query}%"
+        params.extend([q, q, q, q])
+
+    if state:
+        conditions.append("state = ?")
+        params.append(state)
+
+    if business_type:
+        conditions.append("business_type = ?")
+        params.append(business_type)
+
+    if max_distance is not None:
+        conditions.append("distance_miles <= ?")
+        params.append(max_distance)
+
+    where = "WHERE " + " AND ".join(conditions) if conditions else ""
+
+    cursor.execute(f"""
+        SELECT * FROM businesses {where}
+        ORDER BY distance_miles ASC, legal_business_name ASC
+    """, params)
+
+    rows = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
 def get_business_by_id(business_id):
     conn = get_connection()
     cursor = conn.cursor()

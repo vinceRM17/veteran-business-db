@@ -1,7 +1,7 @@
 import streamlit as st
 from datetime import datetime, timedelta
 
-from database import create_tables, get_all_fetch_status, get_last_fetch, get_stats
+from database import create_tables, get_all_fetch_status, get_last_fetch, get_stats, get_contact_stats
 from config import SAM_GOV_API_KEY, SOURCE_SAM_GOV, SOURCE_USASPENDING
 
 st.set_page_config(page_title="Fetch Data | Veteran Business Directory", page_icon="🎖️", layout="wide")
@@ -156,6 +156,44 @@ if st.button("Fetch USAspending Data", key="usa_fetch", type="primary"):
         )
     except Exception as e:
         st.error(f"USAspending fetch error: {e}")
+
+st.divider()
+
+# --- Contact Enrichment ---
+st.subheader("Contact Enrichment")
+st.caption("Search the web for missing phone, email, and website info (DuckDuckGo + site scraping)")
+
+contact_stats = get_contact_stats()
+ct_col1, ct_col2, ct_col3, ct_col4 = st.columns(4)
+ct_col1.metric("Have Phone", f"{contact_stats['has_phone']}/{contact_stats['total']}")
+ct_col2.metric("Have Email", f"{contact_stats['has_email']}/{contact_stats['total']}")
+ct_col3.metric("Have Website", f"{contact_stats['has_website']}/{contact_stats['total']}")
+ct_col4.metric("Missing All Contact", contact_stats["missing_all"])
+
+enrich_batch_size = st.slider("Batch size", min_value=10, max_value=200, value=50, step=10,
+                              help="Number of businesses to enrich per run")
+
+if st.button("Enrich Missing Contacts", key="enrich_contacts", type="primary"):
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+
+    def enrich_callback(msg, pct):
+        status_text.text(msg)
+        if pct is not None:
+            progress_bar.progress(min(pct, 1.0))
+
+    try:
+        from enrich import run_enrichment_batch
+        result = run_enrichment_batch(batch_size=enrich_batch_size, callback=enrich_callback)
+        progress_bar.progress(1.0)
+        st.success(
+            f"Enrichment complete! "
+            f"Processed: {result['total_processed']} | "
+            f"Enriched: {result['enriched']} | "
+            f"Skipped: {result['skipped']}"
+        )
+    except Exception as e:
+        st.error(f"Enrichment error: {e}")
 
 st.divider()
 
