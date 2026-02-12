@@ -138,7 +138,8 @@ if data:
         icon=folium.Icon(color="darkred", icon="star", prefix="fa"),
     ).add_to(m)
 
-    # Business markers
+    # Business markers — build coordinate lookup for click handling
+    coord_to_id = {}
     for biz in data:
         bt = biz.get("business_type", "")
         is_sdvosb = "Service Disabled" in bt
@@ -148,6 +149,10 @@ if data:
         name = biz["legal_business_name"]
         city_state = f"{biz.get('city', '')}, {biz.get('state', '')}"
         dist = biz.get("distance_miles")
+        lat, lng = biz["latitude"], biz["longitude"]
+
+        # Store mapping for click detection
+        coord_to_id[(round(lat, 5), round(lng, 5))] = biz["id"]
 
         popup_lines = [
             "<div style='font-family: sans-serif; line-height: 1.5;'>",
@@ -165,12 +170,13 @@ if data:
             popup_lines.append(f"✉️ {biz['email']}")
         if biz.get("website"):
             popup_lines.append(f'🌐 <a href="{biz["website"]}" target="_blank" style="color: #2e86ab;">{biz["website"]}</a>')
+        popup_lines.append("<br><b style='color: #2e86ab; cursor: pointer;'>Click marker again to view full details →</b>")
         popup_lines.append("</div>")
 
         popup_html = "<br>".join(popup_lines)
 
         folium.CircleMarker(
-            location=[biz["latitude"], biz["longitude"]],
+            location=[lat, lng],
             radius=7,
             color=color,
             fill=True,
@@ -180,8 +186,16 @@ if data:
             tooltip=name,
         ).add_to(m)
 
-    st_folium(m, use_container_width=True, height=500)
+    map_data = st_folium(m, use_container_width=True, height=500)
     st.caption(f"Showing {len(data)} businesses  |  🟢 VOB  |  🔵 SDVOSB  |  ⭐ Active Heroes HQ  — click a marker for details")
+
+    # Handle marker click — navigate to business detail
+    if map_data and map_data.get("last_object_clicked"):
+        clicked = map_data["last_object_clicked"]
+        clicked_key = (round(clicked["lat"], 5), round(clicked["lng"], 5))
+        if clicked_key in coord_to_id:
+            st.session_state.selected_business_id = coord_to_id[clicked_key]
+            st.switch_page("pages/_Business_Detail.py")
 else:
     st.info("No businesses with coordinates to display on map.")
 
