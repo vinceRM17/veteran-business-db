@@ -51,12 +51,15 @@ action_cols[0].markdown(f"**{len(businesses)} business{'es' if len(businesses) !
 # CSV export
 report_columns = [
     "legal_business_name", "dba_name", "business_type",
+    "owner_name", "service_branch", "linkedin_url",
     "physical_address_line1", "city", "state", "zip_code",
     "phone", "email", "website", "naics_codes",
     distance_key, "registration_status", "source",
 ]
 display_headers = [
-    "Name", "DBA", "Type", "Address", "City", "State", "Zip",
+    "Name", "DBA", "Type",
+    "Owner", "Branch", "LinkedIn",
+    "Address", "City", "State", "Zip",
     "Phone", "Email", "Website", "NAICS",
     distance_col_label, "Registration Status", "Source",
 ]
@@ -147,8 +150,9 @@ for biz in businesses:
         c2.markdown(f"**Email:** {biz.get('email') or 'N/A'}")
         c2.markdown(f"**Website:** {biz.get('website') or 'N/A'}")
 
+        c3.markdown(f"**Owner:** {biz.get('owner_name') or 'N/A'}")
+        c3.markdown(f"**Branch:** {biz.get('service_branch') or 'N/A'}")
         c3.markdown(f"**NAICS:** {biz.get('naics_codes') or 'N/A'}")
-        c3.markdown(f"**Status:** {biz.get('registration_status') or 'N/A'}")
         c3.markdown(f"**Source:** {biz.get('source') or 'N/A'}")
 
 # Also show as a data table for quick scanning

@@ -125,7 +125,8 @@ if custom_location and custom_origin_lat is not None:
                     q_lower in (b.get("legal_business_name") or "").lower() or
                     q_lower in (b.get("dba_name") or "").lower() or
                     q_lower in (b.get("naics_descriptions") or "").lower() or
-                    q_lower in (b.get("city") or "").lower()]
+                    q_lower in (b.get("city") or "").lower() or
+                    q_lower in (b.get("owner_name") or "").lower()]
     if state:
         filtered = [b for b in filtered if b.get("state") == state]
     if biz_type:
@@ -217,6 +218,7 @@ if results["total"] > 0:
     export_cols = [
         c for c in [
             "legal_business_name", "dba_name", "business_type",
+            "owner_name", "service_branch", "linkedin_url",
             "physical_address_line1", "city", "state", "zip_code",
             "phone", "email", "website",
             "naics_codes", "naics_descriptions",
@@ -268,6 +270,8 @@ for biz in results["businesses"]:
             st.switch_page("pages/_Business_Detail.py")
         if biz.get("dba_name"):
             cols[2].caption(f"DBA: {biz['dba_name']}")
+        if biz.get("owner_name"):
+            cols[2].caption(f"Owner: {biz['owner_name']}")
 
         location = f"{biz.get('city', '')}, {biz.get('state', '')} {biz.get('zip_code', '')}"
         cols[3].text(location)

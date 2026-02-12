@@ -27,6 +27,43 @@ SOCIAL_PATTERNS = {
     "twitter": re.compile(r'https?://(?:www\.)?(?:twitter|x)\.com/[a-zA-Z0-9_]+/?'),
 }
 
+SERVICE_BRANCH_PATTERNS = [
+    re.compile(r'\b(U\.?S\.?\s*)?(Army)\s*(veteran|vet)\b', re.IGNORECASE),
+    re.compile(r'\b(U\.?S\.?\s*)?(Navy)\s*(veteran|vet)\b', re.IGNORECASE),
+    re.compile(r'\b(U\.?S\.?\s*)?(Air\s*Force)\s*(veteran|vet)\b', re.IGNORECASE),
+    re.compile(r'\b(U\.?S\.?\s*)?(Marine\s*Corps?|Marines?)\s*(veteran|vet)\b', re.IGNORECASE),
+    re.compile(r'\b(U\.?S\.?\s*)?(Coast\s*Guard)\s*(veteran|vet)\b', re.IGNORECASE),
+    re.compile(r'\b(U\.?S\.?\s*)?(Space\s*Force)\s*(veteran|vet)\b', re.IGNORECASE),
+    re.compile(r'\b(U\.?S\.?\s*)?(National\s*Guard)\s*(veteran|vet|member)\b', re.IGNORECASE),
+    re.compile(r'\bserved\s+in\s+the\s+(Army|Navy|Air\s*Force|Marine\s*Corps?|Marines?|Coast\s*Guard|Space\s*Force|National\s*Guard)\b', re.IGNORECASE),
+    re.compile(r'\bretired\s+(?:from\s+(?:the\s+)?)(Army|Navy|Air\s*Force|Marine\s*Corps?|Marines?|Coast\s*Guard|Space\s*Force|National\s*Guard)\b', re.IGNORECASE),
+    re.compile(r'\bformer\s+(Army|Navy|Air\s*Force|Marine\s*Corps?|Marines?|Coast\s*Guard|Space\s*Force|National\s*Guard)\b', re.IGNORECASE),
+]
+
+_BRANCH_NORMALIZE = {
+    "army": "Army",
+    "navy": "Navy",
+    "air force": "Air Force",
+    "airforce": "Air Force",
+    "marine corps": "Marine Corps",
+    "marines": "Marine Corps",
+    "marine": "Marine Corps",
+    "coast guard": "Coast Guard",
+    "coastguard": "Coast Guard",
+    "space force": "Space Force",
+    "spaceforce": "Space Force",
+    "national guard": "National Guard",
+    "nationalguard": "National Guard",
+}
+
+OWNER_PATTERNS = [
+    re.compile(r'(?:Owner|Founder|Founded\s+by|CEO|President|Principal)[:\s]+([A-Z][a-z]+(?:\s+[A-Z]\.?)?\s+[A-Z][a-z]+)', re.IGNORECASE),
+    re.compile(r'([A-Z][a-z]+(?:\s+[A-Z]\.?)?\s+[A-Z][a-z]+),?\s+(?:Owner|Founder|CEO|President|Principal)', re.IGNORECASE),
+    re.compile(r'(?:owned\s+by|operated\s+by|led\s+by)[:\s]+([A-Z][a-z]+(?:\s+[A-Z]\.?)?\s+[A-Z][a-z]+)', re.IGNORECASE),
+]
+
+LINKEDIN_RE = re.compile(r'https?://(?:www\.)?linkedin\.com/(?:company|in)/[a-zA-Z0-9\-]+/?')
+
 SKIP_DOMAINS = {
     "google.com", "bing.com", "yahoo.com", "duckduckgo.com",
     "yelp.com", "yellowpages.com", "bbb.org", "mapquest.com",
@@ -104,9 +141,57 @@ def extract_socials_from_results(results):
     return socials
 
 
+def extract_owner_from_snippets(results):
+    """Extract owner/founder/CEO name from search result snippets."""
+    for r in results:
+        text = r.get("snippet", "") + " " + r.get("title", "")
+        for pattern in OWNER_PATTERNS:
+            match = pattern.search(text)
+            if match:
+                name = match.group(1).strip()
+                # Basic sanity: at least two words, not too long
+                if len(name.split()) >= 2 and len(name) <= 40:
+                    return name
+    return ""
+
+
+def extract_service_branch_from_text(text):
+    """Detect military branch mentions in text and return normalized branch name."""
+    for pattern in SERVICE_BRANCH_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            # Find the group that captured the branch name
+            for group in match.groups():
+                if group:
+                    key = group.strip().lower().replace("  ", " ")
+                    if key in _BRANCH_NORMALIZE:
+                        return _BRANCH_NORMALIZE[key]
+            # Fallback: try full match text for branch keywords
+            full = match.group(0).lower()
+            for key, val in _BRANCH_NORMALIZE.items():
+                if key in full:
+                    return val
+    return ""
+
+
+def extract_linkedin_url(results):
+    """Pull LinkedIn URL from search results into a dedicated field."""
+    for r in results:
+        url = r.get("url", "")
+        match = LINKEDIN_RE.search(url)
+        if match:
+            return match.group(0)
+        # Also check snippets for embedded LinkedIn URLs
+        snippet = r.get("snippet", "")
+        match = LINKEDIN_RE.search(snippet)
+        if match:
+            return match.group(0)
+    return ""
+
+
 def scrape_website_for_contact(url):
-    """Visit the business website and scrape for phone, email, social links."""
-    info = {"phone": "", "email": "", "socials": {}}
+    """Visit the business website and scrape for phone, email, social links, owner, and branch."""
+    info = {"phone": "", "email": "", "socials": {}, "owner_name": "", "service_branch": ""}
     try:
         resp = requests.get(url, headers=HEADERS, timeout=8, allow_redirects=True)
         if resp.status_code != 200:
@@ -150,6 +235,21 @@ def scrape_website_for_contact(url):
                     if match:
                         info["socials"][platform] = match.group(0)
 
+        # Owner name from page text
+        page_text = soup.get_text(" ", strip=True)
+        for pattern in OWNER_PATTERNS:
+            match = pattern.search(page_text)
+            if match:
+                candidate = match.group(1).strip()
+                if len(candidate.split()) >= 2 and len(candidate) <= 40:
+                    info["owner_name"] = candidate
+                    break
+
+        # Service branch from page text
+        branch = extract_service_branch_from_text(page_text)
+        if branch:
+            info["service_branch"] = branch
+
     except Exception:
         pass
 
@@ -168,9 +268,20 @@ def enrich_business(biz_id, name, city, state):
     phone = extract_phone_from_snippets(results)
     email = extract_email_from_snippets(results)
     socials = extract_socials_from_results(results)
+    owner_name = extract_owner_from_snippets(results)
+    linkedin_url = extract_linkedin_url(results)
+
+    # Extract service branch from snippets
+    service_branch = ""
+    for r in results:
+        text = r.get("snippet", "") + " " + r.get("title", "")
+        branch = extract_service_branch_from_text(text)
+        if branch:
+            service_branch = branch
+            break
 
     # If we found a website, try to scrape it for more details
-    if website and (not phone or not email or not socials):
+    if website:
         site_info = scrape_website_for_contact(website)
         if not phone and site_info["phone"]:
             phone = site_info["phone"]
@@ -180,6 +291,10 @@ def enrich_business(biz_id, name, city, state):
             for k, v in site_info["socials"].items():
                 if k not in socials:
                     socials[k] = v
+        if not owner_name and site_info.get("owner_name"):
+            owner_name = site_info["owner_name"]
+        if not service_branch and site_info.get("service_branch"):
+            service_branch = site_info["service_branch"]
 
     # Build social string for notes
     social_str = ""
@@ -191,6 +306,9 @@ def enrich_business(biz_id, name, city, state):
         "email": email,
         "website": website,
         "socials": social_str,
+        "owner_name": owner_name,
+        "linkedin_url": linkedin_url,
+        "service_branch": service_branch,
     }
 
 
@@ -243,6 +361,12 @@ def run_enrichment():
             found.append("website")
         if info["socials"]:
             found.append("social")
+        if info.get("owner_name"):
+            found.append("owner")
+        if info.get("linkedin_url"):
+            found.append("linkedin")
+        if info.get("service_branch"):
+            found.append("branch")
 
         if found:
             conn = get_connection()
@@ -265,9 +389,17 @@ def run_enrichment():
                 SET phone = CASE WHEN phone IS NULL OR phone = '' THEN ? ELSE phone END,
                     email = CASE WHEN email IS NULL OR email = '' THEN ? ELSE email END,
                     website = CASE WHEN website IS NULL OR website = '' THEN ? ELSE website END,
+                    owner_name = CASE WHEN owner_name IS NULL OR owner_name = '' THEN ? ELSE owner_name END,
+                    linkedin_url = CASE WHEN linkedin_url IS NULL OR linkedin_url = '' THEN ? ELSE linkedin_url END,
+                    service_branch = CASE WHEN service_branch IS NULL OR service_branch = '' THEN ? ELSE service_branch END,
                     notes = ?
                 WHERE id = ?
-            """, (info["phone"], info["email"], info["website"], notes, biz["id"]))
+            """, (
+                info["phone"], info["email"], info["website"],
+                info.get("owner_name", ""), info.get("linkedin_url", ""),
+                info.get("service_branch", ""),
+                notes, biz["id"],
+            ))
 
             conn.commit()
             conn.close()
@@ -362,6 +494,12 @@ def run_enrichment_batch(batch_size=50, callback=None):
             found.append("website")
         if info["socials"]:
             found.append("social")
+        if info.get("owner_name"):
+            found.append("owner")
+        if info.get("linkedin_url"):
+            found.append("linkedin")
+        if info.get("service_branch"):
+            found.append("branch")
 
         if found:
             conn = get_connection()
@@ -384,9 +522,17 @@ def run_enrichment_batch(batch_size=50, callback=None):
                 SET phone = CASE WHEN phone IS NULL OR phone = '' THEN ? ELSE phone END,
                     email = CASE WHEN email IS NULL OR email = '' THEN ? ELSE email END,
                     website = CASE WHEN website IS NULL OR website = '' THEN ? ELSE website END,
+                    owner_name = CASE WHEN owner_name IS NULL OR owner_name = '' THEN ? ELSE owner_name END,
+                    linkedin_url = CASE WHEN linkedin_url IS NULL OR linkedin_url = '' THEN ? ELSE linkedin_url END,
+                    service_branch = CASE WHEN service_branch IS NULL OR service_branch = '' THEN ? ELSE service_branch END,
                     notes = ?
                 WHERE id = ?
-            """, (info["phone"], info["email"], info["website"], notes, biz["id"]))
+            """, (
+                info["phone"], info["email"], info["website"],
+                info.get("owner_name", ""), info.get("linkedin_url", ""),
+                info.get("service_branch", ""),
+                notes, biz["id"],
+            ))
 
             conn.commit()
             conn.close()

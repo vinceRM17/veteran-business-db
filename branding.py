@@ -1,17 +1,27 @@
 """Active Heroes branded UI components and trust tier configuration."""
 
 import html as _html
+import json
 import streamlit as st
 
 # ── Color Palette ─────────────────────────────────────────────────────────────
 BRAND_BLUE = "#2ea3f2"
 NAVY = "#1b3a5c"
-DARK = "#333333"
+DARK = "#2D3748"
 BODY = "#666666"
-PAGE_BG = "#f7f8fa"
+PAGE_BG = "#F7FAFC"
 OLIVE = "#4a5d23"
 GOLD = "#c9a227"
 GRAY_TIER = "#888888"
+RED_ACCENT = "#C53030"
+GREEN = "#2F855A"
+AMBER = "#D69E2E"
+
+# ── Navy Chart Color Sequence ────────────────────────────────────────────────
+CHART_COLORS = [
+    "#1B3A5C", "#2C5282", "#3182CE", "#63B3ED",
+    "#C53030", "#FC8181", "#2F855A", "#68D391",
+]
 
 # ── Trust Tiers ───────────────────────────────────────────────────────────────
 TRUST_TIERS = {
@@ -32,7 +42,7 @@ TRUST_TIERS = {
         "weight": 3,
         "fields": [
             "naics_codes", "naics_descriptions", "dba_name",
-            "service_branch", "certification_date",
+            "service_branch", "owner_name", "certification_date",
         ],
     },
     "third_party": {
@@ -41,7 +51,7 @@ TRUST_TIERS = {
         "bg": "#e8f4fd",
         "weight": 2,
         "fields": [
-            "phone", "email", "website",
+            "phone", "email", "website", "linkedin_url",
         ],
     },
     "web_discovery": {
@@ -69,10 +79,12 @@ FIELD_LABELS = {
     "naics_descriptions": "Industry",
     "dba_name": "DBA Name",
     "service_branch": "Service Branch",
+    "owner_name": "Owner / Founder",
     "certification_date": "Certification Date",
     "phone": "Phone",
     "email": "Email",
     "website": "Website",
+    "linkedin_url": "LinkedIn",
     "physical_address_line1": "Address Line 1",
     "physical_address_line2": "Address Line 2",
     "city": "City",
@@ -98,6 +110,88 @@ CONFIDENCE_GRADES = [
     {"min": 0,  "grade": "F", "label": "Needs Data",      "color": "#c62828"},
 ]
 
+# ── Field Groups (for confidence breakdown) ──────────────────────────────────
+FIELD_GROUPS = {
+    "identity": {
+        "label": "Identity",
+        "icon": "🏢",
+        "fields": ["legal_business_name", "dba_name", "business_type"],
+        "source_hint": "SAM.gov",
+    },
+    "registration": {
+        "label": "Registration",
+        "icon": "🛡️",
+        "fields": ["uei", "cage_code", "registration_status", "registration_expiration", "entity_start_date"],
+        "source_hint": "SAM.gov",
+    },
+    "location": {
+        "label": "Location",
+        "icon": "📍",
+        "fields": ["physical_address_line1", "city", "state", "zip_code"],
+        "source_hint": "SAM.gov",
+    },
+    "industry": {
+        "label": "Industry",
+        "icon": "📋",
+        "fields": ["naics_codes", "naics_descriptions"],
+        "source_hint": "SAM.gov",
+    },
+    "service": {
+        "label": "Service Info",
+        "icon": "🎖️",
+        "fields": ["service_branch", "certification_date"],
+        "source_hint": "SAM.gov / Manual",
+    },
+    "contact": {
+        "label": "Contact",
+        "icon": "📞",
+        "fields": ["phone", "email", "website"],
+        "source_hint": "Web Enrichment",
+    },
+    "geography": {
+        "label": "Geography",
+        "icon": "🌍",
+        "fields": ["latitude", "longitude", "distance_miles"],
+        "source_hint": "Geocoded",
+    },
+}
+
+
+# ── Confidence Grade Criteria (rule-based, top-down) ────────────────────────
+#
+# A (Verified):  Registration (UEI) + Location + Contact + Industry
+# B (Strong):    Registration (UEI) + Location + Industry
+# C (Basic):     Registration (UEI) + Location
+# D (Minimal):   Identity (name) + Location (city+state)
+# F (Stub):      Missing UEI or location
+#
+GRADE_CRITERIA = [
+    {
+        "grade": "A", "label": "Verified", "color": "#2F855A",
+        "description": "Has registration, location, contact info, and industry data",
+    },
+    {
+        "grade": "B", "label": "Strong", "color": "#2C5282",
+        "description": "Has registration, location, and industry classification",
+    },
+    {
+        "grade": "C", "label": "Basic", "color": "#D69E2E",
+        "description": "Has registration and location",
+    },
+    {
+        "grade": "D", "label": "Minimal", "color": "#DD6B20",
+        "description": "Has identity and partial location",
+    },
+    {
+        "grade": "F", "label": "Stub", "color": "#C53030",
+        "description": "Missing registration or location",
+    },
+]
+
+GRADE_INFO = {g["grade"]: g for g in GRADE_CRITERIA}
+GRADE_OPTIONS = [f"{g['grade']} - {g['label']}" for g in GRADE_CRITERIA]
+
+
 # ── Source Icons ─────────────────────────────────────────────────────────────
 _SOURCE_ICONS = {
     "official":      ("🛡️", "SAM.gov verified"),
@@ -109,10 +203,10 @@ _SOURCE_ICONS = {
 
 # ── Branded CSS ───────────────────────────────────────────────────────────────
 BRANDED_CSS = """<style>
-    @import url('https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
     html, body, [class*="css"] {
-        font-family: 'Open Sans', sans-serif;
+        font-family: 'Inter', 'Open Sans', sans-serif;
     }
 
     /* Navy sidebar */
@@ -163,12 +257,12 @@ BRANDED_CSS = """<style>
 
     /* Brand blue active tab underline */
     .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {
-        border-bottom-color: #2ea3f2 !important;
-        color: #2ea3f2 !important;
+        border-bottom-color: #1B3A5C !important;
+        color: #1B3A5C !important;
     }
 
-    /* Metric cards */
-    [data-testid="stMetricValue"] { font-size: 1.8rem; font-weight: 700; color: #333333; }
+    /* Default metric cards (fallback) */
+    [data-testid="stMetricValue"] { font-size: 1.8rem; font-weight: 700; color: #2D3748; }
     [data-testid="stMetricLabel"] { font-size: 0.9rem; color: #666666; }
     div[data-testid="stMetric"] {
         background: white;
@@ -183,9 +277,27 @@ BRANDED_CSS = """<style>
         box-shadow: 0 4px 16px rgba(0,0,0,0.10);
     }
 
+    /* Custom metric card */
+    .metric-card {
+        background: white;
+        border: 1px solid #E2E8F0;
+        border-radius: 0.75rem;
+        padding: 1.25rem 1.25rem 1rem 1.25rem;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+        text-align: left;
+    }
+    .metric-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 16px rgba(0,0,0,0.10);
+    }
+    .metric-card .mc-icon { font-size: 1.5rem; margin-bottom: 0.25rem; }
+    .metric-card .mc-value { font-size: 1.8rem; font-weight: 800; color: #2D3748; line-height: 1.2; }
+    .metric-card .mc-label { font-size: 0.85rem; color: #718096; margin-top: 0.15rem; }
+
     /* Hero header */
     .hero-header {
-        background: linear-gradient(135deg, #1b3a5c 0%, #2ea3f2 60%, #4a5d23 100%);
+        background: linear-gradient(135deg, #1b3a5c 0%, #2C5282 50%, #3182CE 100%);
         color: white;
         padding: 2rem 2.5rem;
         border-radius: 1rem;
@@ -225,8 +337,8 @@ BRANDED_CSS = """<style>
 
     /* Headers */
     h1 { color: #1b3a5c; }
-    h2 { color: #333333; }
-    h3 { color: #4a5d23; }
+    h2 { color: #2D3748; }
+    h3 { color: #2C5282; }
 
     /* Tier badge styles */
     .tier-badge {
@@ -244,8 +356,80 @@ BRANDED_CSS = """<style>
     .tier-third-party { background: #2ea3f2; }
     .tier-web-discovery { background: #888888; }
 
+    /* Grade badge styles */
+    .grade-badge {
+        display: inline-block;
+        padding: 3px 14px;
+        border-radius: 12px;
+        font-size: 0.82rem;
+        font-weight: 700;
+        color: white;
+        white-space: nowrap;
+        letter-spacing: 0.3px;
+    }
+    .grade-A { background: #2F855A; }
+    .grade-B { background: #2C5282; }
+    .grade-C { background: #D69E2E; }
+    .grade-D { background: #DD6B20; }
+    .grade-F { background: #C53030; }
+
+    /* Source tags */
+    .source-tag {
+        display: inline-block;
+        background: #EDF2F7;
+        color: #4A5568;
+        border: 1px solid #E2E8F0;
+        padding: 1px 8px;
+        border-radius: 8px;
+        font-size: 0.72rem;
+        font-weight: 600;
+        margin-right: 3px;
+    }
+
+    /* Confidence breakdown grid */
+    .conf-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0.75rem;
+        margin: 0.75rem 0;
+    }
+    .conf-group-card {
+        background: white;
+        border: 1px solid #E2E8F0;
+        border-radius: 0.5rem;
+        padding: 0.75rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+    .conf-group-card .cg-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.35rem;
+    }
+    .conf-group-card .cg-label {
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: #2D3748;
+    }
+    .conf-group-card .cg-count {
+        font-size: 0.72rem;
+        color: #718096;
+    }
+    .conf-group-card .cg-bar {
+        height: 6px;
+        background: #EDF2F7;
+        border-radius: 3px;
+        overflow: hidden;
+        margin-bottom: 0.25rem;
+    }
+    .conf-group-card .cg-bar-fill {
+        height: 100%;
+        border-radius: 3px;
+        transition: width 0.3s ease;
+    }
+
     /* Links */
-    a { color: #2ea3f2; }
+    a { color: #3182CE; }
 
     /* Smooth transitions on interactive elements */
     button, [role="button"], .stButton > button {
@@ -363,6 +547,155 @@ def confidence_meter_html(biz):
     )
 
 
+# ── Rule-Based Grade Assignment ──────────────────────────────────────────────
+
+def assign_confidence_grade(biz):
+    """Assign a letter grade A-F based on what field groups are present.
+
+    Returns dict with grade, label, color, description.
+    """
+    has_uei = bool(biz.get("uei"))
+    has_location = bool(biz.get("city")) and bool(biz.get("state"))
+    has_address = has_location and bool(biz.get("physical_address_line1"))
+    has_industry = bool(biz.get("naics_codes")) or bool(biz.get("naics_descriptions"))
+    has_contact = bool(biz.get("phone")) or bool(biz.get("email")) or bool(biz.get("website"))
+    has_name = bool(biz.get("legal_business_name"))
+
+    if has_uei and has_address and has_contact and has_industry:
+        grade = "A"
+    elif has_uei and has_address and has_industry:
+        grade = "B"
+    elif has_uei and has_location:
+        grade = "C"
+    elif has_name and has_location:
+        grade = "D"
+    else:
+        grade = "F"
+
+    info = GRADE_INFO[grade]
+    return {
+        "grade": info["grade"],
+        "label": info["label"],
+        "color": info["color"],
+        "description": info["description"],
+    }
+
+
+def calculate_confidence_detail(biz):
+    """Compute per-field-group breakdown for a business.
+
+    Returns dict with: grade info + groups dict (group_key -> filled/total/source/fields).
+    """
+    grade_info = assign_confidence_grade(biz)
+    groups = {}
+
+    for group_key, group_def in FIELD_GROUPS.items():
+        fields = group_def["fields"]
+        field_status = {}
+        filled = 0
+        for f in fields:
+            has_value = bool(biz.get(f))
+            field_status[f] = has_value
+            if has_value:
+                filled += 1
+        groups[group_key] = {
+            "label": group_def["label"],
+            "icon": group_def["icon"],
+            "filled": filled,
+            "total": len(fields),
+            "source": group_def["source_hint"],
+            "fields": field_status,
+        }
+
+    return {
+        "grade": grade_info["grade"],
+        "label": grade_info["label"],
+        "color": grade_info["color"],
+        "groups": groups,
+    }
+
+
+# ── Grade Badge HTML ─────────────────────────────────────────────────────────
+
+def grade_badge_html(grade, show_label=True):
+    """Return a colored pill badge for a letter grade."""
+    info = GRADE_INFO.get(grade, GRADE_INFO["F"])
+    label_text = f" {info['label']}" if show_label else ""
+    return (
+        f'<span class="grade-badge grade-{grade}">'
+        f'{grade}{label_text}</span>'
+    )
+
+
+def grade_badge_with_score_html(biz):
+    """Return grade badge + confidence score percentage."""
+    conf = compute_confidence_score(biz)
+    grade_info = assign_confidence_grade(biz)
+    return (
+        f'<span class="grade-badge grade-{grade_info["grade"]}">'
+        f'{grade_info["grade"]} ({conf["score"]}%)</span>'
+    )
+
+
+# ── Confidence Breakdown Renderer ────────────────────────────────────────────
+
+def render_confidence_breakdown(biz):
+    """Render a 3-column grid of field-group cards with progress bars."""
+    detail = calculate_confidence_detail(biz)
+    cards = ""
+
+    for group_key, group in detail["groups"].items():
+        filled = group["filled"]
+        total = group["total"]
+        pct = round(filled / total * 100) if total > 0 else 0
+        bar_color = "#2F855A" if pct >= 80 else "#3182CE" if pct >= 40 else "#D69E2E" if pct > 0 else "#E2E8F0"
+
+        cards += (
+            f'<div class="conf-group-card">'
+            f'<div class="cg-header">'
+            f'<span class="cg-label">{group["icon"]} {group["label"]}</span>'
+            f'<span class="cg-count">{filled}/{total}</span>'
+            f'</div>'
+            f'<div class="cg-bar"><div class="cg-bar-fill" '
+            f'style="width:{pct}%; background:{bar_color};"></div></div>'
+            f'<span class="source-tag">{group["source"]}</span>'
+            f'</div>'
+        )
+
+    return (
+        f'<div class="conf-grid">{cards}</div>'
+    )
+
+
+# ── Metric Card Helper ───────────────────────────────────────────────────────
+
+def metric_card(label, value, icon="", border_color=NAVY):
+    """Return HTML for a styled KPI card with icon, value, and label."""
+    return (
+        f'<div class="metric-card" style="border-top: 3px solid {border_color};">'
+        f'<div class="mc-icon">{icon}</div>'
+        f'<div class="mc-value">{value}</div>'
+        f'<div class="mc-label">{label}</div>'
+        f'</div>'
+    )
+
+
+# ── Chart Style Helper ───────────────────────────────────────────────────────
+
+def style_chart(fig, height=400):
+    """Apply consistent Plotly theming with navy color sequence."""
+    fig.update_layout(
+        template="plotly_white",
+        font=dict(family="Inter, sans-serif", color="#2D3748"),
+        colorway=CHART_COLORS,
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        height=height,
+        margin=dict(l=20, r=20, t=40, b=20),
+    )
+    return fig
+
+
 # ── Per-Field Source Indicators ──────────────────────────────────────────────
 
 def infer_field_source(biz, field_name):
@@ -440,6 +773,13 @@ def render_tier_card_html(biz, tier_key):
                 display = (
                     f'<a href="mailto:{display}" '
                     f'style="color: {tier["color"]}; text-decoration: none;">{display}</a>'
+                )
+            elif field == "linkedin_url":
+                url = display if display.startswith("http") else f"https://{display}"
+                display = (
+                    f'<a href="{url}" target="_blank" '
+                    f'style="color: {tier["color"]}; text-decoration: none;">'
+                    f'&#x1F517; {display}</a>'
                 )
             elif field == "registration_status":
                 display = "Active" if display == "A" else display

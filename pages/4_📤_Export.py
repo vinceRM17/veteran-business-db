@@ -23,6 +23,7 @@ if st.button("Generate CSV"):
     export_cols = [
         c for c in [
             "legal_business_name", "dba_name", "business_type",
+            "owner_name", "service_branch", "linkedin_url",
             "physical_address_line1", "city", "state", "zip_code",
             "phone", "email", "website",
             "naics_codes", "naics_descriptions",

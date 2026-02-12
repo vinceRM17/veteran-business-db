@@ -41,6 +41,16 @@ with col_title:
     st.title(biz["legal_business_name"])
     if biz.get("dba_name"):
         st.caption(f"DBA: {biz['dba_name']}")
+    # Owner, branch, LinkedIn sub-header
+    sub_parts = []
+    if biz.get("owner_name"):
+        sub_parts.append(f"**Owner:** {biz['owner_name']}")
+    if biz.get("service_branch"):
+        sub_parts.append(f"**Branch:** {biz['service_branch']}")
+    if biz.get("linkedin_url"):
+        sub_parts.append(f"[LinkedIn]({biz['linkedin_url']})")
+    if sub_parts:
+        st.markdown(" &nbsp;|&nbsp; ".join(sub_parts))
 with col_badge:
     bt = biz.get("business_type", "")
     if "Service Disabled" in (bt or ""):
@@ -104,6 +114,10 @@ if is_logged_in:
             email = ec2.text_input("Email", value=biz.get("email") or "")
             website = ec3.text_input("Website", value=biz.get("website") or "")
 
+            eo1, eo2 = st.columns(2)
+            owner_name = eo1.text_input("Owner / Founder", value=biz.get("owner_name") or "")
+            linkedin_url = eo2.text_input("LinkedIn URL", value=biz.get("linkedin_url") or "")
+
             st.markdown("**Business Details**")
             ed1, ed2 = st.columns(2)
             legal_name = ed1.text_input("Legal Business Name", value=biz.get("legal_business_name") or "")
@@ -146,6 +160,8 @@ if is_logged_in:
                     "phone": phone.strip(),
                     "email": email.strip(),
                     "website": website.strip(),
+                    "owner_name": owner_name.strip(),
+                    "linkedin_url": linkedin_url.strip(),
                     "business_type": biz_type,
                     "service_branch": branch,
                     "physical_address_line1": addr1.strip(),

@@ -91,8 +91,24 @@ def create_tables():
         )
     """)
 
+    _migrate_columns(conn)
+
     conn.commit()
     conn.close()
+
+
+def _migrate_columns(conn):
+    """Add columns introduced after the initial schema (idempotent)."""
+    migrations = [
+        ("businesses", "owner_name", "TEXT"),
+        ("businesses", "linkedin_url", "TEXT"),
+    ]
+    cursor = conn.cursor()
+    for table, column, col_type in migrations:
+        try:
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+        except Exception:
+            pass  # column already exists
 
 
 def upsert_business(business: dict):
@@ -466,6 +482,7 @@ def export_to_csv(output_path="veteran_businesses_export.csv"):
     cursor.execute("""
         SELECT
             legal_business_name, dba_name, business_type,
+            owner_name, service_branch, linkedin_url,
             physical_address_line1, physical_address_line2,
             city, state, zip_code,
             phone, email, website,
@@ -530,10 +547,10 @@ def search_businesses(query="", state="", business_type="", max_distance=None,
 
     if query:
         conditions.append(
-            "(legal_business_name LIKE ? OR dba_name LIKE ? OR naics_descriptions LIKE ? OR city LIKE ?)"
+            "(legal_business_name LIKE ? OR dba_name LIKE ? OR naics_descriptions LIKE ? OR city LIKE ? OR owner_name LIKE ?)"
         )
         q = f"%{query}%"
-        params.extend([q, q, q, q])
+        params.extend([q, q, q, q, q])
 
     if state:
         conditions.append("state = ?")
@@ -587,10 +604,10 @@ def export_search_to_csv(query="", state="", business_type="", max_distance=None
 
     if query:
         conditions.append(
-            "(legal_business_name LIKE ? OR dba_name LIKE ? OR naics_descriptions LIKE ? OR city LIKE ?)"
+            "(legal_business_name LIKE ? OR dba_name LIKE ? OR naics_descriptions LIKE ? OR city LIKE ? OR owner_name LIKE ?)"
         )
         q = f"%{query}%"
-        params.extend([q, q, q, q])
+        params.extend([q, q, q, q, q])
 
     if state:
         conditions.append("state = ?")
@@ -740,7 +757,7 @@ def update_business_fields(business_id, fields: dict):
         "city", "state", "zip_code",
         "phone", "email", "website",
         "business_type", "naics_codes", "naics_descriptions",
-        "service_branch", "notes",
+        "service_branch", "owner_name", "linkedin_url", "notes",
     }
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
@@ -773,6 +790,54 @@ def get_contact_stats():
         "has_website": has_website,
         "missing_all": total - max(has_phone, has_email, has_website) if total else 0,
     }
+
+
+def get_grade_distribution():
+    """Compute confidence grade distribution across all businesses.
+
+    Uses the rule-based grading: checks UEI, location, contact, industry
+    presence to assign A/B/C/D/F grades via SQL for performance.
+    Returns dict like {"A": 150, "B": 3000, "C": 1200, "D": 50, "F": 10}.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT
+            CASE
+                WHEN uei IS NOT NULL AND uei != ''
+                     AND physical_address_line1 IS NOT NULL AND physical_address_line1 != ''
+                     AND city IS NOT NULL AND city != ''
+                     AND state IS NOT NULL AND state != ''
+                     AND (phone IS NOT NULL AND phone != '' OR email IS NOT NULL AND email != '' OR website IS NOT NULL AND website != '')
+                     AND (naics_codes IS NOT NULL AND naics_codes != '' OR naics_descriptions IS NOT NULL AND naics_descriptions != '')
+                THEN 'A'
+                WHEN uei IS NOT NULL AND uei != ''
+                     AND physical_address_line1 IS NOT NULL AND physical_address_line1 != ''
+                     AND city IS NOT NULL AND city != ''
+                     AND state IS NOT NULL AND state != ''
+                     AND (naics_codes IS NOT NULL AND naics_codes != '' OR naics_descriptions IS NOT NULL AND naics_descriptions != '')
+                THEN 'B'
+                WHEN uei IS NOT NULL AND uei != ''
+                     AND city IS NOT NULL AND city != ''
+                     AND state IS NOT NULL AND state != ''
+                THEN 'C'
+                WHEN legal_business_name IS NOT NULL AND legal_business_name != ''
+                     AND city IS NOT NULL AND city != ''
+                     AND state IS NOT NULL AND state != ''
+                THEN 'D'
+                ELSE 'F'
+            END as grade,
+            COUNT(*) as cnt
+        FROM businesses
+        GROUP BY grade
+        ORDER BY grade
+    """)
+    result = {row[0]: row[1] for row in cursor.fetchall()}
+    conn.close()
+    # Ensure all grades present
+    for g in ("A", "B", "C", "D", "F"):
+        result.setdefault(g, 0)
+    return result
 
 
 def get_tier_completeness_stats():
