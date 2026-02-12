@@ -644,20 +644,23 @@ def get_map_data(max_distance=None):
     conn = get_connection()
     cursor = conn.cursor()
 
-    if max_distance:
-        cursor.execute("""
-            SELECT id, legal_business_name, dba_name, city, state, zip_code,
+    _map_cols = """id, legal_business_name, dba_name, city, state, zip_code,
                    business_type, distance_miles, latitude, longitude,
-                   phone, email, website
+                   phone, email, website,
+                   uei, cage_code, registration_status, naics_codes,
+                   naics_descriptions, registration_expiration,
+                   entity_start_date, source"""
+
+    if max_distance:
+        cursor.execute(f"""
+            SELECT {_map_cols}
             FROM businesses
             WHERE latitude IS NOT NULL AND longitude IS NOT NULL
               AND distance_miles <= ?
         """, (max_distance,))
     else:
-        cursor.execute("""
-            SELECT id, legal_business_name, dba_name, city, state, zip_code,
-                   business_type, distance_miles, latitude, longitude,
-                   phone, email, website
+        cursor.execute(f"""
+            SELECT {_map_cols}
             FROM businesses
             WHERE latitude IS NOT NULL AND longitude IS NOT NULL
         """)
@@ -770,3 +773,52 @@ def get_contact_stats():
         "has_website": has_website,
         "missing_all": total - max(has_phone, has_email, has_website) if total else 0,
     }
+
+
+def get_tier_completeness_stats():
+    """Return per-tier, per-field completeness percentages.
+
+    Returns dict keyed by tier_key, each containing:
+      - filled: average filled fields across all businesses
+      - total: total fields in tier
+      - fields: {field_name: pct_non_null}
+    """
+    from branding import TRUST_TIERS
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT COUNT(*) FROM businesses")
+    total_biz = cursor.fetchone()[0]
+    if total_biz == 0:
+        conn.close()
+        return {}
+
+    result = {}
+    for tier_key, tier_info in TRUST_TIERS.items():
+        fields = tier_info["fields"]
+        field_pcts = {}
+        total_filled_pct = 0.0
+
+        for field in fields:
+            cursor.execute(
+                f"SELECT COUNT(*) FROM businesses WHERE [{field}] IS NOT NULL AND [{field}] != ''",
+            )
+            count = cursor.fetchone()[0]
+            pct = round(count / total_biz * 100)
+            field_pcts[field] = pct
+            total_filled_pct += pct
+
+        avg_pct = round(total_filled_pct / len(fields)) if fields else 0
+        # filled / total as average counts
+        avg_filled = round(avg_pct / 100 * len(fields), 1)
+
+        result[tier_key] = {
+            "filled": avg_filled,
+            "total": len(fields),
+            "pct": avg_pct,
+            "fields": field_pcts,
+        }
+
+    conn.close()
+    return result

@@ -2,10 +2,14 @@ import streamlit as st
 import pandas as pd
 import folium
 from streamlit_folium import st_folium
-from database import create_tables, get_stats, get_contact_stats, get_map_data, get_all_businesses_with_coords, get_all_fetch_status
+from database import create_tables, get_stats, get_contact_stats, get_map_data, get_all_businesses_with_coords, get_all_fetch_status, get_tier_completeness_stats
 from geo import zip_to_coords, filter_by_custom_radius
 from config import ACTIVE_HEROES_LAT, ACTIVE_HEROES_LON
-from branding import inject_branding, sidebar_brand, render_tier_legend_html, BRAND_BLUE, TRUST_TIERS, tier_has_data
+from branding import (
+    inject_branding, sidebar_brand, render_tier_legend_html, BRAND_BLUE, TRUST_TIERS,
+    tier_has_data, confidence_badge_html, render_dashboard_tier_card,
+    compute_confidence_score, CONFIDENCE_GRADES,
+)
 
 st.set_page_config(
     page_title="Veteran Business Directory | Active Heroes",
@@ -66,15 +70,44 @@ with st.sidebar:
     _required_tier_keys = [tier_options[label] for label in required_tiers]
 
 # --- Dashboard Header ---
-st.markdown("""
+stats = get_stats()
+contact_stats = get_contact_stats()
+tier_stats = get_tier_completeness_stats()
+
+# Compute aggregate data quality grade from tier stats
+_agg_score = 0
+if tier_stats:
+    _weights = {k: TRUST_TIERS[k]["weight"] for k in TRUST_TIERS}
+    _total_w = sum(_weights.values())
+    _agg_score = round(
+        sum(tier_stats[k]["pct"] * _weights[k] for k in tier_stats) / _total_w
+    ) if _total_w > 0 else 0
+
+_agg_grade_info = CONFIDENCE_GRADES[-1]
+for _g in CONFIDENCE_GRADES:
+    if _agg_score >= _g["min"]:
+        _agg_grade_info = _g
+        break
+
+_quality_badge = (
+    f'<div style="display:inline-flex; align-items:center; gap:8px; '
+    f'background:rgba(255,255,255,0.15); backdrop-filter:blur(8px); '
+    f'border:1px solid rgba(255,255,255,0.25); border-radius:12px; '
+    f'padding:6px 16px; margin-top:0.75rem;">'
+    f'<span style="font-size:1.3rem; font-weight:800; color:white;">'
+    f'{_agg_grade_info["grade"]}</span>'
+    f'<span style="color:#d4e8f0; font-size:0.85rem;">'
+    f'Data Quality: {_agg_score}%</span>'
+    f'</div>'
+) if tier_stats else ""
+
+st.markdown(f"""
 <div class="hero-header">
     <h1>Veteran Business Directory</h1>
     <p>Built for Active Heroes &bull; Connecting veteran-owned businesses near Shepherdsville, KY</p>
+    {_quality_badge}
 </div>
 """, unsafe_allow_html=True)
-
-stats = get_stats()
-contact_stats = get_contact_stats()
 
 if stats["total"] == 0:
     st.warning("Database is empty. Use the **Fetch Data** or **Import CSV** page to load businesses.")
@@ -99,9 +132,18 @@ if contact_stats["total"] > 0:
     pct = round(has_any_contact / contact_stats["total"] * 100)
     col4.metric("Have Contact Info", f"{pct}%")
 
-# --- Trust Tier Legend ---
-st.subheader("Data Trust Tiers")
+# --- Data Quality Overview ---
+st.subheader("Data Quality Overview")
 st.markdown(render_tier_legend_html(), unsafe_allow_html=True)
+
+if tier_stats:
+    dq_cols = st.columns(4)
+    for i, (tier_key, tier_info) in enumerate(TRUST_TIERS.items()):
+        with dq_cols[i]:
+            st.markdown(
+                render_dashboard_tier_card(tier_key, tier_stats[tier_key]),
+                unsafe_allow_html=True,
+            )
 
 # --- Map Hero Section ---
 st.subheader("Business Locations")
@@ -212,7 +254,10 @@ if data:
         if biz.get("dba_name"):
             popup_lines.append(f"<i style='color: #7a8a99;'>DBA: {biz['dba_name']}</i>")
         popup_lines.append(f"<span style='color: #5a6c7d;'>{city_state}</span>")
-        popup_lines.append(f"<span style='background: {color}; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px;'>{type_label}</span>")
+        popup_lines.append(
+            f"<span style='background: {color}; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px;'>{type_label}</span>"
+            f" {confidence_badge_html(biz)}"
+        )
         if dist is not None:
             popup_lines.append(f"<span style='color: #7a8a99;'>{dist} mi from {distance_from_label}</span>")
         if biz.get("phone"):

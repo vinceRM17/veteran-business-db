@@ -3,6 +3,7 @@ from database import get_business_by_id, update_business_fields, update_business
 from branding import (
     inject_branding, sidebar_brand, render_tier_badges_html,
     render_tier_card_html, TRUST_TIERS, BRAND_BLUE,
+    render_confidence_banner_html, render_source_badge_html,
 )
 
 st.set_page_config(page_title="Business Detail | Veteran Business Directory", page_icon="🎖️", layout="wide")
@@ -52,7 +53,9 @@ with col_badge:
 
 # --- Tier Badges Bar ---
 st.markdown(render_tier_badges_html(biz), unsafe_allow_html=True)
-st.markdown("")  # spacer
+
+# --- Confidence Banner ---
+st.markdown(render_confidence_banner_html(biz), unsafe_allow_html=True)
 
 # --- Tier Cards ---
 col_left, col_right = st.columns(2)
@@ -68,7 +71,11 @@ with col_right:
 # --- Record Metadata ---
 st.divider()
 meta_cols = st.columns(4)
-meta_cols[0].caption(f"**Source:** {biz.get('source') or 'Unknown'}")
+meta_cols[0].markdown(
+    f'<div style="font-size:0.85rem;"><strong>Source:</strong> '
+    f'{render_source_badge_html(biz.get("source"))}</div>',
+    unsafe_allow_html=True,
+)
 meta_cols[1].caption(f"**Added:** {biz.get('date_added', '—')}")
 meta_cols[2].caption(f"**Updated:** {biz.get('date_updated', '—')}")
 if biz.get("notes"):

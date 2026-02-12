@@ -2,7 +2,10 @@ import streamlit as st
 import pandas as pd
 from database import search_businesses, export_search_to_csv, get_all_states, get_all_business_types, get_all_businesses_with_coords, create_tables
 from geo import zip_to_coords, filter_by_custom_radius
-from branding import inject_branding, sidebar_brand, BRAND_BLUE, TRUST_TIERS, tier_has_data, tier_summary
+from branding import (
+    inject_branding, sidebar_brand, BRAND_BLUE, TRUST_TIERS, tier_has_data, tier_summary,
+    confidence_badge_html, confidence_meter_html, compute_confidence_score,
+)
 
 st.set_page_config(page_title="Search | Veteran Business Directory", page_icon="🎖️", layout="wide")
 create_tables()
@@ -48,7 +51,7 @@ required_tiers = st.multiselect(
 _required_tier_keys = [tier_options[label] for label in required_tiers]
 
 # Filters
-col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
+col1, col2, col3, col4, col5 = st.columns([3, 1, 1, 1, 1])
 with col1:
     query = st.text_input("Search", placeholder="Business name, industry, city...")
 with col2:
@@ -63,6 +66,15 @@ with col4:
     dist_options = {"100 miles": 100, "25 miles": 25, "50 miles": 50, "75 miles": 75, "Any Distance": None}
     dist_label = st.selectbox("Distance from HQ", list(dist_options.keys()))
     max_distance = dist_options[dist_label]
+with col5:
+    sort_options = {
+        "Distance": "distance_miles",
+        "Data Quality": "confidence",
+        "Name": "legal_business_name",
+        "City": "city",
+    }
+    sort_label = st.selectbox("Sort by", list(sort_options.keys()))
+    sort_by = sort_options[sort_label]
 
 # --- Custom location toggle ---
 def _on_custom_toggle_change():
@@ -124,6 +136,15 @@ if custom_location and custom_origin_lat is not None:
     # Apply custom radius filter
     filtered = filter_by_custom_radius(custom_origin_lat, custom_origin_lon, filtered, custom_radius)
 
+    # Sort
+    if sort_by == "confidence":
+        filtered.sort(key=lambda b: compute_confidence_score(b)["score"], reverse=True)
+    elif sort_by == "legal_business_name":
+        filtered.sort(key=lambda b: (b.get("legal_business_name") or "").lower())
+    elif sort_by == "city":
+        filtered.sort(key=lambda b: (b.get("city") or "").lower())
+    # else: already sorted by custom_distance_miles from filter_by_custom_radius
+
     total = len(filtered)
     total_pages = max(1, (total + PER_PAGE - 1) // PER_PAGE)
     page = min(st.session_state.search_page, total_pages)
@@ -149,9 +170,11 @@ if custom_location and custom_origin_lat is not None:
     }
 else:
     # Default HQ-based mode
+    db_sort = sort_by if sort_by in {"distance_miles", "legal_business_name", "city"} else "distance_miles"
     results = search_businesses(
         query=query, state=state, business_type=biz_type,
         max_distance=max_distance, page=st.session_state.search_page,
+        sort_by=db_sort,
     )
     # Apply tier filter post-query
     if _required_tier_keys:
@@ -160,6 +183,11 @@ else:
             if all(tier_has_data(b, tk) for tk in _required_tier_keys)
         ]
         results["total"] = len(results["businesses"])
+    # Re-sort by confidence in Python if selected
+    if sort_by == "confidence":
+        results["businesses"].sort(
+            key=lambda b: compute_confidence_score(b)["score"], reverse=True,
+        )
     distance_key = "distance_miles"
     distance_label = "mi"
 
@@ -220,7 +248,7 @@ for biz in results["businesses"]:
             unsafe_allow_html=True,
         )
 
-        cols = st.columns([0.3, 0.5, 3, 2, 1, 1.5])
+        cols = st.columns([0.3, 0.5, 3, 1.5, 0.8, 1, 1.5])
 
         # Checkbox for selection (on_change fires before rerun so count stays accurate)
         is_selected = biz["id"] in st.session_state.selected_businesses
@@ -244,20 +272,35 @@ for biz in results["businesses"]:
         location = f"{biz.get('city', '')}, {biz.get('state', '')} {biz.get('zip_code', '')}"
         cols[3].text(location)
 
-        if is_sdvosb:
-            cols[4].markdown(":blue[**SDVOSB**]")
-        elif bt:
-            cols[4].markdown(":green[**VOB**]")
+        # Confidence badge + meter
+        cols[4].markdown(
+            confidence_badge_html(biz) + "<br>" + confidence_meter_html(biz),
+            unsafe_allow_html=True,
+        )
 
-        # Contact info - show phone if available
+        if is_sdvosb:
+            cols[5].markdown(":blue[**SDVOSB**]")
+        elif bt:
+            cols[5].markdown(":green[**VOB**]")
+
+        # Contact info - color-coded blue for web-discovered origin
         contact_parts = []
         if biz.get("phone"):
-            contact_parts.append(f"📞 {biz['phone']}")
+            contact_parts.append(
+                f'<span style="color:#2ea3f2;" title="Web-discovered">📞 {biz["phone"]}</span>'
+            )
         if biz.get("email"):
-            contact_parts.append("✉️")
+            contact_parts.append(
+                '<span style="color:#2ea3f2;" title="Web-discovered">✉️</span>'
+            )
         if biz.get("website"):
-            contact_parts.append("🌐")
-        cols[5].markdown(" ".join(contact_parts) if contact_parts else "⚠️ No contact")
+            contact_parts.append(
+                '<span style="color:#2ea3f2;" title="Web-discovered">🌐</span>'
+            )
+        cols[6].markdown(
+            " ".join(contact_parts) if contact_parts else "⚠️ No contact",
+            unsafe_allow_html=True,
+        )
 
 # Pagination controls
 if results["total_pages"] > 1:
