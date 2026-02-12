@@ -1010,34 +1010,42 @@ def get_grade_distribution():
     """
     conn = get_connection()
     cursor = conn.cursor()
+    # Count filled fields out of the 17 scored fields, compute percentage,
+    # then bucket into grades: A>=70%, B>=50%, C>=30%, D>=15%, F<15%
     cursor.execute("""
         SELECT
             CASE
-                WHEN physical_address_line1 IS NOT NULL AND physical_address_line1 != ''
-                     AND city IS NOT NULL AND city != ''
-                     AND state IS NOT NULL AND state != ''
-                     AND (phone IS NOT NULL AND phone != '' OR email IS NOT NULL AND email != '' OR website IS NOT NULL AND website != '')
-                     AND (naics_codes IS NOT NULL AND naics_codes != '' OR naics_descriptions IS NOT NULL AND naics_descriptions != '')
-                THEN 'A'
-                WHEN physical_address_line1 IS NOT NULL AND physical_address_line1 != ''
-                     AND city IS NOT NULL AND city != ''
-                     AND state IS NOT NULL AND state != ''
-                     AND (phone IS NOT NULL AND phone != '' OR email IS NOT NULL AND email != ''
-                          OR website IS NOT NULL AND website != ''
-                          OR naics_codes IS NOT NULL AND naics_codes != ''
-                          OR naics_descriptions IS NOT NULL AND naics_descriptions != '')
-                THEN 'B'
-                WHEN legal_business_name IS NOT NULL AND legal_business_name != ''
-                     AND city IS NOT NULL AND city != ''
-                     AND state IS NOT NULL AND state != ''
-                THEN 'C'
-                WHEN legal_business_name IS NOT NULL AND legal_business_name != ''
-                     AND (state IS NOT NULL AND state != '' OR city IS NOT NULL AND city != '')
-                THEN 'D'
+                WHEN pct >= 70 THEN 'A'
+                WHEN pct >= 50 THEN 'B'
+                WHEN pct >= 30 THEN 'C'
+                WHEN pct >= 15 THEN 'D'
                 ELSE 'F'
             END as grade,
             COUNT(*) as cnt
-        FROM businesses
+        FROM (
+            SELECT ROUND(
+                (
+                    (CASE WHEN legal_business_name IS NOT NULL AND legal_business_name != '' THEN 1 ELSE 0 END)
+                  + (CASE WHEN dba_name IS NOT NULL AND dba_name != '' THEN 1 ELSE 0 END)
+                  + (CASE WHEN business_type IS NOT NULL AND business_type != '' THEN 1 ELSE 0 END)
+                  + (CASE WHEN physical_address_line1 IS NOT NULL AND physical_address_line1 != '' THEN 1 ELSE 0 END)
+                  + (CASE WHEN city IS NOT NULL AND city != '' THEN 1 ELSE 0 END)
+                  + (CASE WHEN state IS NOT NULL AND state != '' THEN 1 ELSE 0 END)
+                  + (CASE WHEN zip_code IS NOT NULL AND zip_code != '' THEN 1 ELSE 0 END)
+                  + (CASE WHEN phone IS NOT NULL AND phone != '' THEN 1 ELSE 0 END)
+                  + (CASE WHEN email IS NOT NULL AND email != '' THEN 1 ELSE 0 END)
+                  + (CASE WHEN website IS NOT NULL AND website != '' THEN 1 ELSE 0 END)
+                  + (CASE WHEN naics_codes IS NOT NULL AND naics_codes != '' THEN 1 ELSE 0 END)
+                  + (CASE WHEN naics_descriptions IS NOT NULL AND naics_descriptions != '' THEN 1 ELSE 0 END)
+                  + (CASE WHEN uei IS NOT NULL AND uei != '' THEN 1 ELSE 0 END)
+                  + (CASE WHEN cage_code IS NOT NULL AND cage_code != '' THEN 1 ELSE 0 END)
+                  + (CASE WHEN registration_status IS NOT NULL AND registration_status != '' THEN 1 ELSE 0 END)
+                  + (CASE WHEN owner_name IS NOT NULL AND owner_name != '' THEN 1 ELSE 0 END)
+                  + (CASE WHEN service_branch IS NOT NULL AND service_branch != '' THEN 1 ELSE 0 END)
+                ) * 100.0 / 17
+            ) as pct
+            FROM businesses
+        )
         GROUP BY grade
         ORDER BY grade
     """)

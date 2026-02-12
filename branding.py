@@ -157,34 +157,40 @@ FIELD_GROUPS = {
 }
 
 
-# ── Confidence Grade Criteria (rule-based, top-down) ────────────────────────
+# ── Confidence Grade Criteria (completeness-percentage-based) ────────────────
 #
-# A (Comprehensive): Address + Contact + Industry
-# B (Strong):        Address + (Contact or Industry)
-# C (Core Data):     Name + City + State
-# D (Partial):       Name + (State or City)
-# F (Sparse):        Else
+# Grades are assigned based on how many of the 17 scored fields are filled in.
+# A (Comprehensive): 70%+   (12+ of 17 fields)
+# B (Strong):        50-69% (9-11 fields)
+# C (Core Data):     30-49% (5-8 fields)
+# D (Partial):       15-29% (3-4 fields)
+# F (Sparse):        <15%   (0-2 fields)
 #
 GRADE_CRITERIA = [
     {
         "grade": "A", "label": "Comprehensive", "color": "#2F855A",
-        "description": "Has address, contact info, and industry data",
+        "min_pct": 70,
+        "description": "70%+ of key fields populated",
     },
     {
         "grade": "B", "label": "Strong", "color": "#2C5282",
-        "description": "Has address plus contact or industry data",
+        "min_pct": 50,
+        "description": "50-69% of key fields populated",
     },
     {
         "grade": "C", "label": "Core Data", "color": "#D69E2E",
-        "description": "Has name, city, and state",
+        "min_pct": 30,
+        "description": "30-49% of key fields populated",
     },
     {
         "grade": "D", "label": "Partial", "color": "#DD6B20",
-        "description": "Has name plus state or city",
+        "min_pct": 15,
+        "description": "15-29% of key fields populated",
     },
     {
         "grade": "F", "label": "Sparse", "color": "#C53030",
-        "description": "Missing most key fields",
+        "min_pct": 0,
+        "description": "Under 15% of key fields populated",
     },
 ]
 
@@ -549,38 +555,6 @@ def confidence_meter_html(biz):
 
 # ── Rule-Based Grade Assignment ──────────────────────────────────────────────
 
-def assign_confidence_grade(biz):
-    """Assign a letter grade A-F based on what field groups are present.
-
-    Returns dict with grade, label, color, description.
-    """
-    has_name = bool(biz.get("legal_business_name"))
-    has_city = bool(biz.get("city"))
-    has_state = bool(biz.get("state"))
-    has_address = has_city and has_state and bool(biz.get("physical_address_line1"))
-    has_industry = bool(biz.get("naics_codes")) or bool(biz.get("naics_descriptions"))
-    has_contact = bool(biz.get("phone")) or bool(biz.get("email")) or bool(biz.get("website"))
-
-    if has_address and has_contact and has_industry:
-        grade = "A"
-    elif has_address and (has_contact or has_industry):
-        grade = "B"
-    elif has_name and has_city and has_state:
-        grade = "C"
-    elif has_name and (has_state or has_city):
-        grade = "D"
-    else:
-        grade = "F"
-
-    info = GRADE_INFO[grade]
-    return {
-        "grade": info["grade"],
-        "label": info["label"],
-        "color": info["color"],
-        "description": info["description"],
-    }
-
-
 _COMPLETENESS_FIELDS = [
     "legal_business_name", "dba_name", "business_type",
     "physical_address_line1", "city", "state", "zip_code",
@@ -595,6 +569,27 @@ def compute_completeness_pct(biz):
     """Return 0-100 completeness percentage based on 17 scored fields."""
     filled = sum(1 for f in _COMPLETENESS_FIELDS if biz.get(f))
     return round(filled / len(_COMPLETENESS_FIELDS) * 100)
+
+
+def assign_confidence_grade(biz):
+    """Assign a letter grade A-F based on completeness percentage.
+
+    Returns dict with grade, label, color, description.
+    """
+    pct = compute_completeness_pct(biz)
+
+    info = GRADE_INFO["F"]
+    for g in GRADE_CRITERIA:
+        if pct >= g["min_pct"]:
+            info = GRADE_INFO[g["grade"]]
+            break
+
+    return {
+        "grade": info["grade"],
+        "label": info["label"],
+        "color": info["color"],
+        "description": info["description"],
+    }
 
 
 def completeness_bar_html(biz):
