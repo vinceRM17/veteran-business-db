@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import folium
 from streamlit_folium import st_folium
-from database import create_tables, get_stats, get_contact_stats, get_map_data, get_all_businesses_with_coords
+from database import create_tables, get_stats, get_contact_stats, get_map_data, get_all_businesses_with_coords, get_all_fetch_status
 from geo import zip_to_coords, filter_by_custom_radius
 from config import ACTIVE_HEROES_LAT, ACTIVE_HEROES_LON
 
@@ -311,13 +311,32 @@ with col_right:
 col_a, col_b = st.columns(2)
 
 with col_a:
-    st.subheader("By Distance")
+    st.subheader("By Distance from HQ")
     if stats.get("by_distance"):
         for bracket, count in stats["by_distance"].items():
             st.text(f"{bracket}: {count}")
+    # Show count of businesses without distance data
+    total_with_dist = sum(stats.get("by_distance", {}).values())
+    no_dist = stats["total"] - total_with_dist
+    if no_dist > 0:
+        st.caption(f"{no_dist} businesses without distance data")
 
 with col_b:
-    st.subheader("By Source")
+    st.subheader("Data Sources")
     if stats.get("by_source"):
         for source, count in stats["by_source"].items():
             st.text(f"{source}: {count}")
+
+    # Data freshness
+    fetch_statuses = get_all_fetch_status()
+    if fetch_statuses:
+        st.caption("Last updated:")
+        from datetime import datetime
+        for fs in fetch_statuses:
+            completed = fs.get("completed_at", "")
+            try:
+                dt = datetime.fromisoformat(completed)
+                days_ago = (datetime.now() - dt).days
+                st.caption(f"  {fs['source']}: {days_ago}d ago")
+            except (ValueError, TypeError):
+                st.caption(f"  {fs['source']}: unknown")

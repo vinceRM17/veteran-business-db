@@ -4,7 +4,9 @@ SQLite database setup and operations for veteran-owned business data.
 
 import sqlite3
 import csv
+import re
 from datetime import datetime
+from difflib import SequenceMatcher
 from config import DB_PATH
 
 
@@ -69,9 +71,28 @@ def create_tables():
         CREATE INDEX IF NOT EXISTS idx_distance ON businesses(distance_miles)
     """)
 
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_name_zip
+        ON businesses(legal_business_name COLLATE NOCASE, zip_code)
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS fetch_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            completed_at TEXT,
+            status TEXT NOT NULL DEFAULT 'running',
+            records_fetched INTEGER DEFAULT 0,
+            records_new INTEGER DEFAULT 0,
+            records_updated INTEGER DEFAULT 0,
+            error_message TEXT,
+            details TEXT
+        )
+    """)
+
     conn.commit()
     conn.close()
-    print(f"Database created at {DB_PATH}")
 
 
 def upsert_business(business: dict):
@@ -178,6 +199,236 @@ def upsert_business(business: dict):
     ))
     conn.commit()
     conn.close()
+
+
+# --- Fetch log helpers ---
+
+def start_fetch_log(source):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO fetch_log (source, started_at, status) VALUES (?, ?, 'running')",
+        (source, datetime.now().isoformat()),
+    )
+    log_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return log_id
+
+
+def complete_fetch_log(log_id, status="completed", records_fetched=0,
+                       records_new=0, records_updated=0, error_msg=None, details=None):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE fetch_log SET
+            completed_at = ?, status = ?,
+            records_fetched = ?, records_new = ?, records_updated = ?,
+            error_message = ?, details = ?
+        WHERE id = ?
+    """, (
+        datetime.now().isoformat(), status,
+        records_fetched, records_new, records_updated,
+        error_msg, details, log_id,
+    ))
+    conn.commit()
+    conn.close()
+
+
+def get_last_fetch(source):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT * FROM fetch_log
+        WHERE source = ? AND status = 'completed'
+        ORDER BY completed_at DESC LIMIT 1
+    """, (source,))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_all_fetch_status():
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT f1.* FROM fetch_log f1
+        INNER JOIN (
+            SELECT source, MAX(id) as max_id
+            FROM fetch_log WHERE status = 'completed'
+            GROUP BY source
+        ) f2 ON f1.id = f2.max_id
+        ORDER BY f1.source
+    """)
+    rows = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def get_running_fetch(source):
+    """Return the most recent running fetch for a source, if any."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT * FROM fetch_log
+        WHERE source = ? AND status = 'running'
+        ORDER BY started_at DESC LIMIT 1
+    """, (source,))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+# --- Cross-source dedup ---
+
+_NAME_SUFFIXES = re.compile(
+    r'\b(llc|inc|corp|co|ltd|incorporated|corporation|company|limited|l\.l\.c\.?|l\.p\.?)\b',
+    re.IGNORECASE,
+)
+_PUNCTUATION = re.compile(r'[^\w\s]')
+_WHITESPACE = re.compile(r'\s+')
+
+
+def _normalize_business_name(name):
+    if not name:
+        return ""
+    name = _NAME_SUFFIXES.sub("", name)
+    name = _PUNCTUATION.sub("", name)
+    name = _WHITESPACE.sub(" ", name).strip().lower()
+    return name
+
+
+def upsert_business_cross_source(business: dict):
+    """Insert or update a business using cross-source deduplication.
+
+    Priority:
+    1. Match by UEI (exact)
+    2. Match by normalized name + zip (fuzzy, threshold 0.85)
+    3. Insert new record
+
+    On update: only overwrite empty fields; append source to comma-separated source field.
+    Returns: 'new', 'updated', or 'unchanged'
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    now = datetime.now().isoformat()
+
+    existing = None
+
+    # 1. Try UEI match
+    uei = business.get("uei")
+    if uei:
+        cursor.execute("SELECT * FROM businesses WHERE uei = ?", (uei,))
+        row = cursor.fetchone()
+        if row:
+            existing = dict(row)
+
+    # 2. Try fuzzy name + zip match
+    if existing is None:
+        incoming_name = _normalize_business_name(business.get("legal_business_name", ""))
+        incoming_zip = (business.get("zip_code") or "")[:5]
+
+        if incoming_name and incoming_zip:
+            cursor.execute(
+                "SELECT * FROM businesses WHERE zip_code LIKE ?",
+                (incoming_zip + "%",),
+            )
+            candidates = [dict(r) for r in cursor.fetchall()]
+            best_ratio = 0.0
+            best_match = None
+            for cand in candidates:
+                cand_name = _normalize_business_name(cand.get("legal_business_name", ""))
+                ratio = SequenceMatcher(None, incoming_name, cand_name).ratio()
+                if ratio > best_ratio:
+                    best_ratio = ratio
+                    best_match = cand
+            if best_ratio >= 0.85 and best_match is not None:
+                existing = best_match
+
+    if existing:
+        # Merge: only overwrite empty fields
+        updates = {}
+        merge_fields = [
+            "uei", "cage_code", "dba_name",
+            "physical_address_line1", "physical_address_line2",
+            "city", "state", "zip_code", "phone", "email", "website",
+            "business_type", "naics_codes", "naics_descriptions",
+            "registration_status", "registration_expiration",
+            "entity_start_date", "latitude", "longitude", "distance_miles",
+        ]
+        for field in merge_fields:
+            new_val = business.get(field)
+            old_val = existing.get(field)
+            if new_val and not old_val:
+                updates[field] = new_val
+
+        # Append source
+        new_source = business.get("source", "")
+        old_source = existing.get("source", "")
+        if new_source and new_source not in (old_source or ""):
+            merged_source = f"{old_source}, {new_source}" if old_source else new_source
+            updates["source"] = merged_source
+
+        # Append notes
+        new_notes = business.get("notes", "")
+        old_notes = existing.get("notes", "")
+        if new_notes and new_notes not in (old_notes or ""):
+            merged_notes = f"{old_notes}; {new_notes}" if old_notes else new_notes
+            updates["notes"] = merged_notes
+
+        if updates:
+            updates["date_updated"] = now
+            set_clause = ", ".join(f"{k} = ?" for k in updates)
+            values = list(updates.values()) + [existing["id"]]
+            cursor.execute(f"UPDATE businesses SET {set_clause} WHERE id = ?", values)
+            conn.commit()
+            conn.close()
+            return "updated"
+        else:
+            conn.close()
+            return "unchanged"
+    else:
+        # Insert new record
+        cursor.execute("""
+            INSERT INTO businesses (
+                uei, cage_code, legal_business_name, dba_name,
+                physical_address_line1, physical_address_line2,
+                city, state, zip_code, phone, email, website,
+                business_type, naics_codes, naics_descriptions,
+                registration_status, registration_expiration,
+                entity_start_date, source,
+                latitude, longitude, distance_miles,
+                date_added, date_updated, notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            business.get("uei"),
+            business.get("cage_code"),
+            business.get("legal_business_name"),
+            business.get("dba_name"),
+            business.get("physical_address_line1"),
+            business.get("physical_address_line2"),
+            business.get("city"),
+            business.get("state"),
+            business.get("zip_code"),
+            business.get("phone"),
+            business.get("email"),
+            business.get("website"),
+            business.get("business_type"),
+            business.get("naics_codes"),
+            business.get("naics_descriptions"),
+            business.get("registration_status"),
+            business.get("registration_expiration"),
+            business.get("entity_start_date"),
+            business.get("source"),
+            business.get("latitude"),
+            business.get("longitude"),
+            business.get("distance_miles"),
+            now, now,
+            business.get("notes"),
+        ))
+        conn.commit()
+        conn.close()
+        return "new"
 
 
 def get_stats():

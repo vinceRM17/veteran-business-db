@@ -53,8 +53,8 @@ with col3:
         "SDVOSB" if "Service Disabled" in x else "VOB" if x else x
     ))
 with col4:
-    dist_options = {"Any Distance": None, "25 miles": 25, "50 miles": 50, "75 miles": 75, "100 miles": 100}
-    dist_label = st.selectbox("Distance", list(dist_options.keys()))
+    dist_options = {"100 miles": 100, "25 miles": 25, "50 miles": 50, "75 miles": 75, "Any Distance": None}
+    dist_label = st.selectbox("Distance from HQ", list(dist_options.keys()))
     max_distance = dist_options[dist_label]
 
 # --- Custom location toggle ---
