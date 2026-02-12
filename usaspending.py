@@ -29,6 +29,9 @@ _TYPE_MAP = {
     "service_disabled_veterans_small_business": "Service Disabled Veteran Owned Small Business",
 }
 
+# Max pages per recipient type to avoid infinite loops
+MAX_PAGES = 500
+
 
 def fetch_usaspending_veterans(callback=None):
     """Fetch veteran-owned businesses from USAspending.gov contract awards.
@@ -51,13 +54,16 @@ def fetch_usaspending_veterans(callback=None):
         today = datetime.now().strftime("%Y-%m-%d")
 
         for vet_type in VETERAN_RECIPIENT_TYPES:
+            type_label = _TYPE_MAP.get(vet_type, vet_type)
             if callback:
-                callback(f"Fetching {_TYPE_MAP.get(vet_type, vet_type)}...", None)
+                callback(f"Fetching {type_label}...", None)
+            else:
+                print(f"\nFetching {type_label}...")
 
             page = 1
             has_next = True
 
-            while has_next:
+            while has_next and page <= MAX_PAGES:
                 payload = {
                     "filters": {
                         "recipient_type_names": [vet_type],
@@ -67,14 +73,10 @@ def fetch_usaspending_veterans(callback=None):
                         ],
                     },
                     "fields": [
-                        "recipient_name",
-                        "recipient_id",
-                        "recipient_state_code",
-                        "recipient_city_name",
-                        "recipient_zip_code",
-                        "recipient_address_line_1",
+                        "Recipient Name",
                         "Award Amount",
-                        "Description",
+                        "Place of Performance State Code",
+                        "Place of Performance Zip5",
                     ],
                     "page": page,
                     "limit": 100,
@@ -86,7 +88,7 @@ def fetch_usaspending_veterans(callback=None):
                     resp = requests.post(
                         f"{USASPENDING_BASE_URL}/search/spending_by_award/",
                         json=payload,
-                        timeout=30,
+                        timeout=60,
                     )
                     resp.raise_for_status()
                     data = resp.json()
@@ -99,9 +101,15 @@ def fetch_usaspending_veterans(callback=None):
                             print(f"  {msg}")
                         time.sleep(30)
                         continue
+                    if callback:
+                        callback(f"API error: HTTP {resp.status_code}", None)
+                    else:
+                        print(f"  API error: HTTP {resp.status_code}")
                     break
                 except Exception as e:
-                    if not callback:
+                    if callback:
+                        callback(f"Request error: {e}", None)
+                    else:
                         print(f"  Request error: {e}")
                     break
 
@@ -110,18 +118,17 @@ def fetch_usaspending_veterans(callback=None):
                     has_next = False
                     break
 
-                total_pages = max(1, (data.get("page_metadata", {}).get("total", 0) + 99) // 100)
+                page_meta = data.get("page_metadata", {})
+                has_next = page_meta.get("hasNext", False)
 
                 if callback:
-                    pct = page / max(total_pages, 1)
-                    callback(
-                        f"Fetching {_TYPE_MAP.get(vet_type, vet_type)}: page {page}/{total_pages}",
-                        pct,
-                    )
+                    callback(f"Fetching {type_label}: page {page} ({len(seen_recipients)} unique so far)", None)
+                elif page % 10 == 0:
+                    print(f"  Page {page}, {len(seen_recipients)} unique recipients so far")
 
                 for award in awards:
-                    name = (award.get("recipient_name") or "").strip()
-                    state = (award.get("recipient_state_code") or "").strip()
+                    name = (award.get("Recipient Name") or "").strip()
+                    state = (award.get("Place of Performance State Code") or "").strip()
                     if not name:
                         continue
 
@@ -136,15 +143,12 @@ def fetch_usaspending_veterans(callback=None):
                     seen_recipients[key] = {
                         "name": name,
                         "state": state,
-                        "city": (award.get("recipient_city_name") or "").strip(),
-                        "zip_code": (award.get("recipient_zip_code") or "").strip(),
-                        "address": (award.get("recipient_address_line_1") or "").strip(),
+                        "zip_code": (award.get("Place of Performance Zip5") or "").strip(),
                         "biz_type": _TYPE_MAP.get(vet_type, "Veteran Owned Small Business"),
                         "total_awards": float(amount) if amount else 0,
                         "award_count": 1,
                     }
 
-                has_next = page < total_pages
                 page += 1
                 time.sleep(0.5)
 
@@ -152,19 +156,22 @@ def fetch_usaspending_veterans(callback=None):
         total_recipients = len(seen_recipients)
         result["unique_recipients"] = total_recipients
 
+        if not callback:
+            print(f"\nSaving {total_recipients} unique recipients...")
+
         for i, ((name_lower, state), info) in enumerate(seen_recipients.items()):
             if callback and i % 50 == 0:
                 pct = i / max(total_recipients, 1)
                 callback(f"Saving recipients: {i}/{total_recipients}", pct)
+            elif not callback and i % 500 == 0 and i > 0:
+                print(f"  Saved {i}/{total_recipients}")
 
             awards_note = f"Federal contracts: ${info['total_awards']:,.0f} ({info['award_count']} awards)"
 
             business = {
                 "legal_business_name": info["name"],
-                "city": info["city"],
                 "state": info["state"],
                 "zip_code": info["zip_code"],
-                "physical_address_line1": info["address"],
                 "business_type": info["biz_type"],
                 "source": SOURCE_USASPENDING,
                 "notes": awards_note,
@@ -187,6 +194,9 @@ def fetch_usaspending_veterans(callback=None):
 
         if callback:
             callback("USAspending fetch complete!", 1.0)
+        else:
+            print(f"\nDone! Fetched: {result['total_fetched']}, "
+                  f"New: {result['new']}, Updated: {result['updated']}")
 
     except Exception as e:
         complete_fetch_log(log_id, status="failed", error_msg=str(e),
