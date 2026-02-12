@@ -1,5 +1,6 @@
 """
 SQLite database setup and operations for veteran-owned business data.
+Supports both local SQLite and Turso cloud database (via HTTP pipeline API).
 """
 
 import sqlite3
@@ -7,10 +8,180 @@ import csv
 import re
 from datetime import datetime
 from difflib import SequenceMatcher
-from config import DB_PATH
+from config import DB_PATH, TURSO_URL, TURSO_AUTH_TOKEN
 
+
+# ---------------------------------------------------------------------------
+# Turso compatibility wrapper  (HTTP pipeline API)
+# ---------------------------------------------------------------------------
+# Turso exposes an HTTP endpoint at /v2/pipeline that accepts SQL statements
+# and returns typed JSON results.  The wrapper below translates that into the
+# same interface callers already use (cursor / fetchone / fetchall / dict(row))
+# so *no* other code in database.py or enrich.py needs to change.
+# ---------------------------------------------------------------------------
+
+import requests as _requests
+
+
+def _turso_url(libsql_url):
+    """Convert libsql:// URL to https:// for the HTTP pipeline endpoint."""
+    return libsql_url.replace("libsql://", "https://")
+
+
+def _encode_param(value):
+    """Encode a Python value into a Turso Hrana typed-value dict."""
+    if value is None:
+        return {"type": "null"}
+    if isinstance(value, int):
+        return {"type": "integer", "value": str(value)}
+    if isinstance(value, float):
+        return {"type": "float", "value": value}
+    if isinstance(value, bytes):
+        import base64
+        return {"type": "blob", "base64": base64.b64encode(value).decode()}
+    return {"type": "text", "value": str(value)}
+
+
+def _decode_value(typed):
+    """Decode a Turso Hrana typed-value dict back to a Python value."""
+    t = typed.get("type")
+    if t == "null":
+        return None
+    if t == "integer":
+        return int(typed["value"])
+    if t == "float":
+        return typed["value"]
+    if t == "blob":
+        import base64
+        return base64.b64decode(typed["base64"])
+    # text and anything else
+    return typed.get("value")
+
+
+class _TursoRow:
+    """Drop-in replacement for sqlite3.Row."""
+    __slots__ = ("_columns", "_values", "_map")
+
+    def __init__(self, columns, values):
+        self._columns = tuple(columns)
+        self._values = tuple(values)
+        self._map = dict(zip(columns, values))
+
+    def __getitem__(self, key):
+        if isinstance(key, (int, slice)):
+            return self._values[key]
+        return self._map[key]
+
+    def keys(self):
+        return self._columns
+
+    def __iter__(self):
+        return iter(self._values)
+
+    def __len__(self):
+        return len(self._values)
+
+
+class _TursoCursor:
+    """Mimics sqlite3.Cursor over the Turso HTTP pipeline API."""
+
+    def __init__(self, api_url, headers):
+        self._api_url = api_url
+        self._headers = headers
+        self._results = []
+        self._description = None
+        self.lastrowid = None
+        self.rowcount = -1
+
+    def execute(self, sql, params=None):
+        stmt = {"sql": sql}
+        if params:
+            stmt["args"] = [_encode_param(p) for p in params]
+
+        body = {"requests": [
+            {"type": "execute", "stmt": stmt},
+            {"type": "close"},
+        ]}
+
+        resp = _requests.post(self._api_url, headers=self._headers, json=body)
+        resp.raise_for_status()
+        data = resp.json()
+
+        result_entry = data["results"][0]
+        if result_entry["type"] == "error":
+            raise RuntimeError(result_entry["error"].get("message", "Turso query error"))
+
+        result = result_entry["response"]["result"]
+        columns = [c["name"] for c in result.get("cols", [])]
+
+        decoded_rows = []
+        for raw_row in result.get("rows", []):
+            decoded_rows.append(
+                _TursoRow(columns, [_decode_value(v) for v in raw_row])
+            )
+
+        self._description = [(c,) for c in columns] if columns else None
+        self._results = decoded_rows
+        self.lastrowid = result.get("last_insert_rowid")
+        self.rowcount = result.get("affected_row_count", -1)
+        return self
+
+    def fetchone(self):
+        if self._results:
+            return self._results.pop(0)
+        return None
+
+    def fetchall(self):
+        rows = self._results
+        self._results = []
+        return rows
+
+    @property
+    def description(self):
+        return self._description
+
+
+class _TursoConnection:
+    """Mimics sqlite3.Connection over the Turso HTTP pipeline API."""
+
+    def __init__(self, url, auth_token):
+        self._api_url = _turso_url(url) + "/v2/pipeline"
+        self._headers = {
+            "Authorization": f"Bearer {auth_token}",
+            "Content-Type": "application/json",
+        }
+
+    def cursor(self):
+        return _TursoCursor(self._api_url, self._headers)
+
+    def commit(self):
+        pass  # Turso auto-commits each statement
+
+    def close(self):
+        pass
+
+    @property
+    def row_factory(self):
+        return None
+
+    @row_factory.setter
+    def row_factory(self, value):
+        pass  # row_factory handled by _TursoRow wrapper
+
+
+# ---------------------------------------------------------------------------
+# Connection factory
+# ---------------------------------------------------------------------------
 
 def get_connection():
+    """Return a database connection.
+
+    If TURSO_URL is configured, returns a _TursoConnection that talks to
+    Turso cloud via HTTP.  Otherwise falls back to a local sqlite3 connection.
+    """
+    if TURSO_URL and TURSO_AUTH_TOKEN:
+        return _TursoConnection(TURSO_URL, TURSO_AUTH_TOKEN)
+
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn

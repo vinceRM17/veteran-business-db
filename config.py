@@ -4,6 +4,17 @@ Configuration for Veteran-Owned Business Database Pipeline.
 Update SAM_GOV_API_KEY with your free key from https://sam.gov/profile/details
 """
 
+import os
+
+
+def _get_secret(key):
+    """Read from Streamlit secrets (if running in Streamlit) or env vars."""
+    try:
+        import streamlit as st
+        return st.secrets[key]
+    except Exception:
+        return os.environ.get(key)
+
 # --- SAM.gov API ---
 SAM_GOV_API_KEY = "SAM-23614dcb-ca88-4815-906c-8833cc26472a"
 SAM_GOV_BASE_URL = "https://api.sam.gov/entity-information/v3/entities"
@@ -38,6 +49,10 @@ SOURCE_CSV_IMPORT = "CSV Import"
 
 # --- Database ---
 DB_PATH = "veteran_businesses.db"
+
+# --- Turso Cloud Database (optional, for Streamlit Cloud deployment) ---
+TURSO_URL = _get_secret("TURSO_CONNECTION_URL")
+TURSO_AUTH_TOKEN = _get_secret("TURSO_AUTH_TOKEN")
 
 # --- Admin Login ---
 ADMIN_PASSWORD = "ActiveHeroes2026"  # Change this to your own password
