@@ -143,14 +143,19 @@ def extract_socials_from_results(results):
 
 def extract_owner_from_snippets(results):
     """Extract owner/founder/CEO name from search result snippets."""
+    _bad_words = {"and", "the", "or", "hey", "our", "his", "her", "its", "all", "who", "for"}
     for r in results:
         text = r.get("snippet", "") + " " + r.get("title", "")
         for pattern in OWNER_PATTERNS:
             match = pattern.search(text)
             if match:
                 name = match.group(1).strip()
-                # Basic sanity: at least two words, not too long
-                if len(name.split()) >= 2 and len(name) <= 40:
+                words = name.split()
+                # Sanity: 2-4 words, not too long, no junk words, each word capitalized
+                if (2 <= len(words) <= 4
+                        and len(name) <= 40
+                        and not any(w.lower() in _bad_words for w in words)
+                        and all(w[0].isupper() for w in words if len(w) > 1)):
                     return name
     return ""
 
@@ -236,12 +241,17 @@ def scrape_website_for_contact(url):
                         info["socials"][platform] = match.group(0)
 
         # Owner name from page text
+        _bad_words = {"and", "the", "or", "hey", "our", "his", "her", "its", "all", "who", "for"}
         page_text = soup.get_text(" ", strip=True)
         for pattern in OWNER_PATTERNS:
             match = pattern.search(page_text)
             if match:
                 candidate = match.group(1).strip()
-                if len(candidate.split()) >= 2 and len(candidate) <= 40:
+                words = candidate.split()
+                if (2 <= len(words) <= 4
+                        and len(candidate) <= 40
+                        and not any(w.lower() in _bad_words for w in words)
+                        and all(w[0].isupper() for w in words if len(w) > 1)):
                     info["owner_name"] = candidate
                     break
 
