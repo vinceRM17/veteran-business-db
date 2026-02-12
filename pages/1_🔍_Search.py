@@ -155,7 +155,7 @@ st.caption(f"{results['total']} businesses found")
 
 # Results
 for biz in results["businesses"]:
-    bt = biz.get("business_type", "")
+    bt = biz.get("business_type") or ""
     is_sdvosb = "Service Disabled" in bt
     border_color = "#2e86ab" if is_sdvosb else "#27ae60" if bt else "#dee2e6"
 

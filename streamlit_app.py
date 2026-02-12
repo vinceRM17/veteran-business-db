@@ -205,7 +205,7 @@ if data:
     # Business markers — build coordinate lookup for click handling
     coord_to_id = {}
     for biz in data:
-        bt = biz.get("business_type", "")
+        bt = biz.get("business_type") or ""
         is_sdvosb = "Service Disabled" in bt
         color = "#2e86ab" if is_sdvosb else "#27ae60"
         type_label = "SDVOSB" if is_sdvosb else "VOB"
