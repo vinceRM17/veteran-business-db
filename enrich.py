@@ -143,7 +143,13 @@ def extract_socials_from_results(results):
 
 def extract_owner_from_snippets(results):
     """Extract owner/founder/CEO name from search result snippets."""
-    _bad_words = {"and", "the", "or", "hey", "our", "his", "her", "its", "all", "who", "for"}
+    _bad_words = {
+        "and", "the", "or", "hey", "our", "his", "her", "its", "all", "who", "for",
+        "address", "city", "state", "phone", "email", "website", "company", "business",
+        "service", "services", "solutions", "nationwide", "international", "american",
+        "about", "contact", "home", "page", "click", "here", "read", "more", "view",
+        "inc", "llc", "corp", "ltd",
+    }
     for r in results:
         text = r.get("snippet", "") + " " + r.get("title", "")
         for pattern in OWNER_PATTERNS:
@@ -151,7 +157,7 @@ def extract_owner_from_snippets(results):
             if match:
                 name = match.group(1).strip()
                 words = name.split()
-                # Sanity: 2-4 words, not too long, no junk words, each word capitalized
+                # Sanity: 2-4 words, not too long, no junk/business words, each word capitalized
                 if (2 <= len(words) <= 4
                         and len(name) <= 40
                         and not any(w.lower() in _bad_words for w in words)
@@ -241,7 +247,13 @@ def scrape_website_for_contact(url):
                         info["socials"][platform] = match.group(0)
 
         # Owner name from page text
-        _bad_words = {"and", "the", "or", "hey", "our", "his", "her", "its", "all", "who", "for"}
+        _bad_words = {
+            "and", "the", "or", "hey", "our", "his", "her", "its", "all", "who", "for",
+            "address", "city", "state", "phone", "email", "website", "company", "business",
+            "service", "services", "solutions", "nationwide", "international", "american",
+            "about", "contact", "home", "page", "click", "here", "read", "more", "view",
+            "inc", "llc", "corp", "ltd",
+        }
         page_text = soup.get_text(" ", strip=True)
         for pattern in OWNER_PATTERNS:
             match = pattern.search(page_text)
