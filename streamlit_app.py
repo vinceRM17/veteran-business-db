@@ -72,7 +72,7 @@ with st.sidebar:
 
     # Grade multiselect
     grade_filter = st.multiselect(
-        "Filter by Data Quality Grade",
+        "Filter by Data Completeness Grade",
         options=GRADE_OPTIONS,
         default=[],
         key="dash_grade_filter",
@@ -140,7 +140,7 @@ _quality_badge = (
     f'<span style="font-size:1.3rem; font-weight:800; color:white;">'
     f'{_agg_grade_info["grade"]}</span>'
     f'<span style="color:#d4e8f0; font-size:0.85rem;">'
-    f'Data Quality: {_agg_score}%</span>'
+    f'Data Completeness: {_agg_score}%</span>'
     f'</div>'
 ) if tier_stats else ""
 
@@ -160,7 +160,9 @@ if stats["total"] == 0:
 vob_count = 0
 sdvosb_count = 0
 for t, c in stats.get("by_type", {}).items():
-    if "Service Disabled" in (t or ""):
+    if not t:
+        continue
+    if "Service Disabled" in t:
         sdvosb_count += c
     else:
         vob_count += c
@@ -184,10 +186,10 @@ with col3:
 with col4:
     st.markdown(metric_card("Have Contact Info", f"{contact_pct}%", "📞", "#D69E2E"), unsafe_allow_html=True)
 with col5:
-    st.markdown(metric_card("Grade A (Verified)", f"{grade_a_count:,}", "✅", "#2F855A"), unsafe_allow_html=True)
+    st.markdown(metric_card("Grade A (Comprehensive)", f"{grade_a_count:,}", "✅", "#2F855A"), unsafe_allow_html=True)
 
 # --- Data Quality Overview ---
-st.subheader("Data Quality Overview")
+st.subheader("Data Completeness Overview")
 st.markdown(render_tier_legend_html(), unsafe_allow_html=True)
 
 if tier_stats:
@@ -201,7 +203,7 @@ if tier_stats:
 
 # --- Grade Distribution Chart ---
 if total_biz > 0:
-    st.subheader("Confidence Grade Distribution")
+    st.subheader("Data Completeness Grade Distribution")
     grade_df = pd.DataFrame([
         {"Grade": f"{g} - {GRADE_INFO[g]['label']}", "Count": grade_dist.get(g, 0), "Color": GRADE_INFO[g]["color"]}
         for g in ("A", "B", "C", "D", "F")
@@ -213,7 +215,7 @@ if total_biz > 0:
             f"{g} - {GRADE_INFO[g]['label']}": GRADE_INFO[g]["color"]
             for g in ("A", "B", "C", "D", "F")
         },
-        title="Businesses by Data Quality Grade",
+        title="Businesses by Data Completeness Grade",
     )
     fig_grade.update_layout(showlegend=False)
     style_chart(fig_grade, height=300)

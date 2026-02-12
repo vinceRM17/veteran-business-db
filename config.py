@@ -54,6 +54,10 @@ DB_PATH = "veteran_businesses.db"
 TURSO_URL = _get_secret("TURSO_CONNECTION_URL")
 TURSO_AUTH_TOKEN = _get_secret("TURSO_AUTH_TOKEN")
 
+# --- Yelp Fusion API ---
+YELP_API_KEY = _get_secret("YELP_API_KEY")
+YELP_API_BASE = "https://api.yelp.com/v3"
+
 # --- Admin Login ---
 ADMIN_PASSWORD = "ActiveHeroes2026"  # Change this to your own password
 

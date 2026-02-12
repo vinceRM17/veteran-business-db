@@ -6,7 +6,7 @@ from branding import (
     inject_branding, sidebar_brand, BRAND_BLUE, TRUST_TIERS, tier_has_data, tier_summary,
     confidence_badge_html, confidence_meter_html, compute_confidence_score,
     assign_confidence_grade, grade_badge_html, grade_badge_with_score_html,
-    render_confidence_breakdown, GRADE_OPTIONS, GRADE_INFO,
+    render_confidence_breakdown, GRADE_OPTIONS, GRADE_INFO, yelp_stars_html,
 )
 
 st.set_page_config(page_title="Search | Veteran Business Directory", page_icon="🎖️", layout="wide")
@@ -44,7 +44,7 @@ if sel_count > 0:
 
 # Grade filter
 grade_filter = st.multiselect(
-    "Filter by Data Quality Grade",
+    "Filter by Data Completeness Grade",
     options=GRADE_OPTIONS,
     default=[],
     key="search_grade_filter",
@@ -81,7 +81,7 @@ with col4:
 with col5:
     sort_options = {
         "Distance": "distance_miles",
-        "Data Quality": "confidence",
+        "Data Completeness": "confidence",
         "Name": "legal_business_name",
         "City": "city",
     }
@@ -326,6 +326,9 @@ for biz in results["businesses"]:
             contact_parts.append(
                 '<span style="color:#3182CE;" title="Web-discovered">🌐</span>'
             )
+        yelp_html = yelp_stars_html(biz)
+        if yelp_html:
+            contact_parts.append(f"<br>{yelp_html}")
         cols[7].markdown(
             " ".join(contact_parts) if contact_parts else "⚠️ No contact",
             unsafe_allow_html=True,

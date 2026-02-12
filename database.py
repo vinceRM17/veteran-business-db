@@ -10,6 +10,28 @@ from datetime import datetime
 from difflib import SequenceMatcher
 from config import DB_PATH, TURSO_URL, TURSO_AUTH_TOKEN
 
+# ---------------------------------------------------------------------------
+# Streamlit caching wrappers (graceful fallback outside Streamlit)
+# ---------------------------------------------------------------------------
+try:
+    import streamlit as st
+    _cache_short = st.cache_data(ttl=60)
+    _cache_long = st.cache_data(ttl=300)
+except Exception:
+    def _cache_short(fn): return fn
+    def _cache_long(fn): return fn
+
+
+def _clear_caches():
+    """Clear all cached query data (call after writes)."""
+    try:
+        for fn in (get_stats, get_contact_stats, get_grade_distribution,
+                   get_tier_completeness_stats, get_all_fetch_status,
+                   get_all_states, get_all_business_types, get_yelp_stats):
+            fn.clear()
+    except Exception:
+        pass
+
 
 # ---------------------------------------------------------------------------
 # Turso compatibility wrapper  (HTTP pipeline API)
@@ -273,6 +295,9 @@ def _migrate_columns(conn):
     migrations = [
         ("businesses", "owner_name", "TEXT"),
         ("businesses", "linkedin_url", "TEXT"),
+        ("businesses", "yelp_rating", "REAL"),
+        ("businesses", "yelp_review_count", "INTEGER"),
+        ("businesses", "yelp_url", "TEXT"),
     ]
     cursor = conn.cursor()
     for table, column, col_type in migrations:
@@ -345,6 +370,7 @@ def upsert_business(business: dict):
             ))
             conn.commit()
             conn.close()
+            _clear_caches()
             return
 
     cursor.execute("""
@@ -386,6 +412,7 @@ def upsert_business(business: dict):
     ))
     conn.commit()
     conn.close()
+    _clear_caches()
 
 
 # --- Fetch log helpers ---
@@ -435,6 +462,7 @@ def get_last_fetch(source):
     return dict(row) if row else None
 
 
+@_cache_short
 def get_all_fetch_status():
     conn = get_connection()
     cursor = conn.cursor()
@@ -618,6 +646,7 @@ def upsert_business_cross_source(business: dict):
         return "new"
 
 
+@_cache_short
 def get_stats():
     conn = get_connection()
     cursor = conn.cursor()
@@ -871,6 +900,7 @@ def get_all_businesses_with_coords():
     return rows
 
 
+@_cache_long
 def get_all_states():
     conn = get_connection()
     cursor = conn.cursor()
@@ -880,6 +910,7 @@ def get_all_states():
     return states
 
 
+@_cache_long
 def get_all_business_types():
     conn = get_connection()
     cursor = conn.cursor()
@@ -895,6 +926,7 @@ def delete_business(business_id):
     cursor.execute("DELETE FROM businesses WHERE id = ?", (business_id,))
     conn.commit()
     conn.close()
+    _clear_caches()
 
 
 def update_business_notes(business_id, notes):
@@ -906,6 +938,7 @@ def update_business_notes(business_id, notes):
     )
     conn.commit()
     conn.close()
+    _clear_caches()
 
 
 def update_business_contact(business_id, phone, email, website):
@@ -917,6 +950,7 @@ def update_business_contact(business_id, phone, email, website):
     )
     conn.commit()
     conn.close()
+    _clear_caches()
 
 
 def update_business_fields(business_id, fields: dict):
@@ -929,6 +963,7 @@ def update_business_fields(business_id, fields: dict):
         "phone", "email", "website",
         "business_type", "naics_codes", "naics_descriptions",
         "service_branch", "owner_name", "linkedin_url", "notes",
+        "yelp_rating", "yelp_review_count", "yelp_url",
     }
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
@@ -940,8 +975,10 @@ def update_business_fields(business_id, fields: dict):
     cursor.execute(f"UPDATE businesses SET {set_clause} WHERE id = ?", values)
     conn.commit()
     conn.close()
+    _clear_caches()
 
 
+@_cache_short
 def get_contact_stats():
     conn = get_connection()
     cursor = conn.cursor()
@@ -963,6 +1000,7 @@ def get_contact_stats():
     }
 
 
+@_cache_short
 def get_grade_distribution():
     """Compute confidence grade distribution across all businesses.
 
@@ -975,26 +1013,26 @@ def get_grade_distribution():
     cursor.execute("""
         SELECT
             CASE
-                WHEN uei IS NOT NULL AND uei != ''
-                     AND physical_address_line1 IS NOT NULL AND physical_address_line1 != ''
+                WHEN physical_address_line1 IS NOT NULL AND physical_address_line1 != ''
                      AND city IS NOT NULL AND city != ''
                      AND state IS NOT NULL AND state != ''
                      AND (phone IS NOT NULL AND phone != '' OR email IS NOT NULL AND email != '' OR website IS NOT NULL AND website != '')
                      AND (naics_codes IS NOT NULL AND naics_codes != '' OR naics_descriptions IS NOT NULL AND naics_descriptions != '')
                 THEN 'A'
-                WHEN uei IS NOT NULL AND uei != ''
-                     AND physical_address_line1 IS NOT NULL AND physical_address_line1 != ''
+                WHEN physical_address_line1 IS NOT NULL AND physical_address_line1 != ''
                      AND city IS NOT NULL AND city != ''
                      AND state IS NOT NULL AND state != ''
-                     AND (naics_codes IS NOT NULL AND naics_codes != '' OR naics_descriptions IS NOT NULL AND naics_descriptions != '')
+                     AND (phone IS NOT NULL AND phone != '' OR email IS NOT NULL AND email != ''
+                          OR website IS NOT NULL AND website != ''
+                          OR naics_codes IS NOT NULL AND naics_codes != ''
+                          OR naics_descriptions IS NOT NULL AND naics_descriptions != '')
                 THEN 'B'
-                WHEN uei IS NOT NULL AND uei != ''
+                WHEN legal_business_name IS NOT NULL AND legal_business_name != ''
                      AND city IS NOT NULL AND city != ''
                      AND state IS NOT NULL AND state != ''
                 THEN 'C'
                 WHEN legal_business_name IS NOT NULL AND legal_business_name != ''
-                     AND city IS NOT NULL AND city != ''
-                     AND state IS NOT NULL AND state != ''
+                     AND (state IS NOT NULL AND state != '' OR city IS NOT NULL AND city != '')
                 THEN 'D'
                 ELSE 'F'
             END as grade,
@@ -1011,6 +1049,7 @@ def get_grade_distribution():
     return result
 
 
+@_cache_short
 def get_tier_completeness_stats():
     """Return per-tier, per-field completeness percentages.
 
@@ -1058,3 +1097,20 @@ def get_tier_completeness_stats():
 
     conn.close()
     return result
+
+
+@_cache_short
+def get_yelp_stats():
+    """Return Yelp enrichment stats: total, has_rating, missing."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM businesses")
+    total = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM businesses WHERE yelp_rating IS NOT NULL")
+    has_rating = cursor.fetchone()[0]
+    conn.close()
+    return {
+        "total": total,
+        "has_rating": has_rating,
+        "missing": total - has_rating,
+    }

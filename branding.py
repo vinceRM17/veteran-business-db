@@ -159,32 +159,32 @@ FIELD_GROUPS = {
 
 # ── Confidence Grade Criteria (rule-based, top-down) ────────────────────────
 #
-# A (Verified):  Registration (UEI) + Location + Contact + Industry
-# B (Strong):    Registration (UEI) + Location + Industry
-# C (Basic):     Registration (UEI) + Location
-# D (Minimal):   Identity (name) + Location (city+state)
-# F (Stub):      Missing UEI or location
+# A (Comprehensive): Address + Contact + Industry
+# B (Strong):        Address + (Contact or Industry)
+# C (Core Data):     Name + City + State
+# D (Partial):       Name + (State or City)
+# F (Sparse):        Else
 #
 GRADE_CRITERIA = [
     {
-        "grade": "A", "label": "Verified", "color": "#2F855A",
-        "description": "Has registration, location, contact info, and industry data",
+        "grade": "A", "label": "Comprehensive", "color": "#2F855A",
+        "description": "Has address, contact info, and industry data",
     },
     {
         "grade": "B", "label": "Strong", "color": "#2C5282",
-        "description": "Has registration, location, and industry classification",
+        "description": "Has address plus contact or industry data",
     },
     {
-        "grade": "C", "label": "Basic", "color": "#D69E2E",
-        "description": "Has registration and location",
+        "grade": "C", "label": "Core Data", "color": "#D69E2E",
+        "description": "Has name, city, and state",
     },
     {
-        "grade": "D", "label": "Minimal", "color": "#DD6B20",
-        "description": "Has identity and partial location",
+        "grade": "D", "label": "Partial", "color": "#DD6B20",
+        "description": "Has name plus state or city",
     },
     {
-        "grade": "F", "label": "Stub", "color": "#C53030",
-        "description": "Missing registration or location",
+        "grade": "F", "label": "Sparse", "color": "#C53030",
+        "description": "Missing most key fields",
     },
 ]
 
@@ -554,20 +554,20 @@ def assign_confidence_grade(biz):
 
     Returns dict with grade, label, color, description.
     """
-    has_uei = bool(biz.get("uei"))
-    has_location = bool(biz.get("city")) and bool(biz.get("state"))
-    has_address = has_location and bool(biz.get("physical_address_line1"))
+    has_name = bool(biz.get("legal_business_name"))
+    has_city = bool(biz.get("city"))
+    has_state = bool(biz.get("state"))
+    has_address = has_city and has_state and bool(biz.get("physical_address_line1"))
     has_industry = bool(biz.get("naics_codes")) or bool(biz.get("naics_descriptions"))
     has_contact = bool(biz.get("phone")) or bool(biz.get("email")) or bool(biz.get("website"))
-    has_name = bool(biz.get("legal_business_name"))
 
-    if has_uei and has_address and has_contact and has_industry:
+    if has_address and has_contact and has_industry:
         grade = "A"
-    elif has_uei and has_address and has_industry:
+    elif has_address and (has_contact or has_industry):
         grade = "B"
-    elif has_uei and has_location:
+    elif has_name and has_city and has_state:
         grade = "C"
-    elif has_name and has_location:
+    elif has_name and (has_state or has_city):
         grade = "D"
     else:
         grade = "F"
@@ -579,6 +579,39 @@ def assign_confidence_grade(biz):
         "color": info["color"],
         "description": info["description"],
     }
+
+
+_COMPLETENESS_FIELDS = [
+    "legal_business_name", "dba_name", "business_type",
+    "physical_address_line1", "city", "state", "zip_code",
+    "phone", "email", "website",
+    "naics_codes", "naics_descriptions",
+    "uei", "cage_code",
+    "registration_status", "owner_name", "service_branch",
+]
+
+
+def compute_completeness_pct(biz):
+    """Return 0-100 completeness percentage based on 17 scored fields."""
+    filled = sum(1 for f in _COMPLETENESS_FIELDS if biz.get(f))
+    return round(filled / len(_COMPLETENESS_FIELDS) * 100)
+
+
+def completeness_bar_html(biz):
+    """Horizontal bar with percentage and small grade badge."""
+    pct = compute_completeness_pct(biz)
+    grade_info = assign_confidence_grade(biz)
+    bar_color = grade_info["color"]
+    return (
+        f'<div style="display:flex; align-items:center; gap:10px;">'
+        f'<div style="flex:1; height:10px; background:#E2E8F0; border-radius:5px; overflow:hidden;">'
+        f'<div style="width:{pct}%; height:100%; background:{bar_color}; border-radius:5px;"></div>'
+        f'</div>'
+        f'<span style="font-size:0.9rem; font-weight:700; color:#333; min-width:40px;">{pct}%</span>'
+        f'<span class="grade-badge grade-{grade_info["grade"]}" '
+        f'style="font-size:0.7rem; padding:2px 8px;">{grade_info["grade"]}</span>'
+        f'</div>'
+    )
 
 
 def calculate_confidence_detail(biz):
@@ -856,22 +889,30 @@ def render_tier_legend_html():
 
 
 def render_confidence_banner_html(biz):
-    """Large confidence banner for the business detail page."""
-    info = compute_confidence_score(biz)
+    """Large confidence banner for the business detail page.
+
+    Leads with completeness %, grade as secondary badge, labelled
+    "Data Completeness".
+    """
+    pct = compute_completeness_pct(biz)
+    grade_info = assign_confidence_grade(biz)
+    color = grade_info["color"]
     meter = confidence_meter_html(biz)
-    # Wider meter for the banner
     wide_meter = meter.replace("max-width:120px", "max-width:300px")
 
     return (
         f'<div style="display:flex; align-items:center; gap:1.5rem; padding:1rem 1.5rem; '
-        f'background:linear-gradient(135deg, {info["color"]}11, {info["color"]}22); '
-        f'border:2px solid {info["color"]}44; border-radius:0.75rem; margin:0.75rem 0 1.25rem 0;">'
-        f'<div style="font-size:2.5rem; font-weight:800; color:{info["color"]}; '
-        f'line-height:1; min-width:50px; text-align:center;">{info["grade"]}</div>'
+        f'background:linear-gradient(135deg, {color}11, {color}22); '
+        f'border:2px solid {color}44; border-radius:0.75rem; margin:0.75rem 0 1.25rem 0;">'
+        f'<div style="font-size:2.5rem; font-weight:800; color:{color}; '
+        f'line-height:1; min-width:50px; text-align:center;">{pct}%</div>'
         f'<div style="flex:1;">'
-        f'<div style="font-size:0.85rem; font-weight:600; color:{info["color"]}; '
-        f'margin-bottom:2px;">{info["label"]} Data Quality</div>'
-        f'<div style="font-size:1.4rem; font-weight:700; color:#333;">{info["score"]}%</div>'
+        f'<div style="font-size:0.85rem; font-weight:600; color:{color}; '
+        f'margin-bottom:2px;">Data Completeness</div>'
+        f'<div style="display:flex; align-items:center; gap:8px;">'
+        f'<span class="grade-badge grade-{grade_info["grade"]}">'
+        f'{grade_info["grade"]} {grade_info["label"]}</span>'
+        f'</div>'
         f'{wide_meter}'
         f'</div>'
         f'</div>'
@@ -923,6 +964,36 @@ def render_dashboard_tier_card(tier_key, stats):
         f'border-radius:2px;"></div></div>'
         f'{field_segments}'
         f'</div>'
+    )
+
+
+def yelp_stars_html(biz):
+    """Render Yelp star rating with review count and link."""
+    rating = biz.get("yelp_rating")
+    if rating is None:
+        return ""
+    review_count = biz.get("yelp_review_count", 0)
+    url = biz.get("yelp_url", "")
+
+    # Build star display
+    full_stars = int(rating)
+    half_star = (rating - full_stars) >= 0.5
+    stars = "★" * full_stars
+    if half_star:
+        stars += "½"
+
+    # Yelp red color
+    yelp_color = "#D32323"
+    link_open = f'<a href="{_html.escape(url)}" target="_blank" style="text-decoration:none;">' if url else ""
+    link_close = "</a>" if url else ""
+
+    return (
+        f'{link_open}'
+        f'<span style="color:{yelp_color}; font-size:0.85rem; font-weight:700;">'
+        f'{stars}</span> '
+        f'<span style="font-size:0.82rem; font-weight:600; color:#333;">{rating}</span> '
+        f'<span style="font-size:0.75rem; color:#718096;">({review_count:,} reviews)</span>'
+        f'{link_close}'
     )
 
 

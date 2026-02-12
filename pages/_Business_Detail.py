@@ -5,7 +5,7 @@ from branding import (
     render_tier_card_html, TRUST_TIERS, BRAND_BLUE,
     render_confidence_banner_html, render_source_badge_html,
     assign_confidence_grade, grade_badge_html,
-    render_confidence_breakdown, GRADE_INFO,
+    render_confidence_breakdown, GRADE_INFO, yelp_stars_html,
 )
 
 st.set_page_config(page_title="Business Detail | Veteran Business Directory", page_icon="🎖️", layout="wide")
@@ -73,6 +73,12 @@ st.markdown(render_tier_badges_html(biz), unsafe_allow_html=True)
 
 # --- Confidence Banner ---
 st.markdown(render_confidence_banner_html(biz), unsafe_allow_html=True)
+
+# --- Yelp Rating (if available) ---
+_yelp_html = yelp_stars_html(biz)
+if _yelp_html:
+    st.markdown(f"##### Yelp Rating")
+    st.markdown(_yelp_html, unsafe_allow_html=True)
 
 # --- Confidence Breakdown Grid (per field group) ---
 st.markdown("##### Data Completeness by Category")

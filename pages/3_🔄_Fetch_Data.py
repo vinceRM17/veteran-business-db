@@ -1,8 +1,8 @@
 import streamlit as st
 from datetime import datetime, timedelta
 
-from database import create_tables, get_all_fetch_status, get_last_fetch, get_stats, get_contact_stats
-from config import SAM_GOV_API_KEY, SOURCE_SAM_GOV, SOURCE_USASPENDING
+from database import create_tables, get_all_fetch_status, get_last_fetch, get_stats, get_contact_stats, get_yelp_stats
+from config import SAM_GOV_API_KEY, SOURCE_SAM_GOV, SOURCE_USASPENDING, YELP_API_KEY
 from branding import inject_branding, sidebar_brand
 
 st.set_page_config(page_title="Fetch Data | Veteran Business Directory", page_icon="🎖️", layout="wide")
@@ -190,6 +190,49 @@ if st.button("Enrich Missing Contacts", key="enrich_contacts", type="primary"):
         )
     except Exception as e:
         st.error(f"Enrichment error: {e}")
+
+st.divider()
+
+# --- Yelp Business Ratings ---
+st.subheader("Yelp Business Ratings")
+st.caption("Search Yelp for star ratings, review counts, and business page links")
+
+if not YELP_API_KEY:
+    st.warning("No Yelp API key configured. Add YELP_API_KEY to .streamlit/secrets.toml or environment.")
+else:
+    st.success("Yelp API key configured")
+
+    yelp_stats = get_yelp_stats()
+    yc1, yc2, yc3 = st.columns(3)
+    yc1.metric("Total Businesses", yelp_stats["total"])
+    yc2.metric("Have Yelp Rating", yelp_stats["has_rating"])
+    yc3.metric("Missing Yelp Data", yelp_stats["missing"])
+
+    yelp_batch_size = st.slider("Batch size", min_value=10, max_value=200, value=50, step=10,
+                                key="yelp_batch_size",
+                                help="Number of businesses to look up per run")
+
+    if st.button("Fetch Yelp Ratings", key="yelp_fetch", type="primary"):
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+
+        def yelp_callback(msg, pct):
+            status_text.text(msg)
+            if pct is not None:
+                progress_bar.progress(min(pct, 1.0))
+
+        try:
+            from yelp_enrich import run_yelp_enrichment_batch
+            result = run_yelp_enrichment_batch(batch_size=yelp_batch_size, callback=yelp_callback)
+            progress_bar.progress(1.0)
+            st.success(
+                f"Yelp enrichment complete! "
+                f"Processed: {result['total_processed']} | "
+                f"Enriched: {result['enriched']} | "
+                f"Skipped: {result['skipped']}"
+            )
+        except Exception as e:
+            st.error(f"Yelp enrichment error: {e}")
 
 st.divider()
 
