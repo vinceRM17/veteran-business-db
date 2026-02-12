@@ -5,7 +5,7 @@ from streamlit_folium import st_folium
 from database import create_tables, get_stats, get_contact_stats, get_map_data, get_all_businesses_with_coords, get_all_fetch_status
 from geo import zip_to_coords, filter_by_custom_radius
 from config import ACTIVE_HEROES_LAT, ACTIVE_HEROES_LON
-from branding import inject_branding, sidebar_brand, render_tier_legend_html, BRAND_BLUE
+from branding import inject_branding, sidebar_brand, render_tier_legend_html, BRAND_BLUE, TRUST_TIERS, tier_has_data
 
 st.set_page_config(
     page_title="Veteran Business Directory | Active Heroes",
@@ -53,6 +53,17 @@ with st.sidebar:
         st.markdown(f"**{sel_count} business{'es' if sel_count != 1 else ''} selected**")
         if st.button("View Report", key="sidebar_report"):
             st.switch_page("pages/5_📊_Report.py")
+
+    # Tier filter
+    st.divider()
+    tier_options = {info["label"]: key for key, info in TRUST_TIERS.items()}
+    required_tiers = st.multiselect(
+        "Must have data from",
+        options=list(tier_options.keys()),
+        default=[],
+        key="dash_tier_filter",
+    )
+    _required_tier_keys = [tier_options[label] for label in required_tiers]
 
 # --- Dashboard Header ---
 st.markdown("""
@@ -139,6 +150,10 @@ if using_custom:
     data = filter_by_custom_radius(map_center_lat, map_center_lon, all_biz, map_custom_radius)
 else:
     data = get_map_data(max_distance=dist_filter)
+
+# Apply tier filter
+if _required_tier_keys:
+    data = [b for b in data if all(tier_has_data(b, tk) for tk in _required_tier_keys)]
 
 if data:
     m = folium.Map(

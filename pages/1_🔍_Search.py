@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from database import search_businesses, export_search_to_csv, get_all_states, get_all_business_types, get_all_businesses_with_coords, create_tables
 from geo import zip_to_coords, filter_by_custom_radius
-from branding import inject_branding, sidebar_brand, BRAND_BLUE
+from branding import inject_branding, sidebar_brand, BRAND_BLUE, TRUST_TIERS, tier_has_data, tier_summary
 
 st.set_page_config(page_title="Search | Veteran Business Directory", page_icon="🎖️", layout="wide")
 create_tables()
@@ -36,6 +36,16 @@ if sel_count > 0:
     if bar_cols[2].button("Clear Selection", key="search_clear_sel"):
         st.session_state.selected_businesses = set()
         st.rerun()
+
+# Tier filter
+tier_options = {info["label"]: key for key, info in TRUST_TIERS.items()}
+required_tiers = st.multiselect(
+    "Must have data from",
+    options=list(tier_options.keys()),
+    default=[],
+    key="search_tier_filter",
+)
+_required_tier_keys = [tier_options[label] for label in required_tiers]
 
 # Filters
 col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
@@ -108,6 +118,8 @@ if custom_location and custom_origin_lat is not None:
         filtered = [b for b in filtered if b.get("state") == state]
     if biz_type:
         filtered = [b for b in filtered if b.get("business_type") == biz_type]
+    if _required_tier_keys:
+        filtered = [b for b in filtered if all(tier_has_data(b, tk) for tk in _required_tier_keys)]
 
     # Apply custom radius filter
     filtered = filter_by_custom_radius(custom_origin_lat, custom_origin_lon, filtered, custom_radius)
@@ -141,6 +153,13 @@ else:
         query=query, state=state, business_type=biz_type,
         max_distance=max_distance, page=st.session_state.search_page,
     )
+    # Apply tier filter post-query
+    if _required_tier_keys:
+        results["businesses"] = [
+            b for b in results["businesses"]
+            if all(tier_has_data(b, tk) for tk in _required_tier_keys)
+        ]
+        results["total"] = len(results["businesses"])
     distance_key = "distance_miles"
     distance_label = "mi"
 
@@ -161,6 +180,10 @@ if results["total"] > 0:
             max_distance=max_distance,
         )
 
+    # Add tier summary to export rows
+    for row in export_rows:
+        row["data_sources"] = tier_summary(row)
+
     export_df = pd.DataFrame(export_rows)
     # Keep useful columns in a clean order
     export_cols = [
@@ -169,7 +192,7 @@ if results["total"] > 0:
             "physical_address_line1", "city", "state", "zip_code",
             "phone", "email", "website",
             "naics_codes", "naics_descriptions",
-            "distance_miles", "source", "notes",
+            "distance_miles", "source", "data_sources", "notes",
         ] if c in export_df.columns
     ]
     if custom_location and "custom_distance_miles" in export_df.columns:

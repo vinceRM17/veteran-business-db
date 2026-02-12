@@ -1,6 +1,7 @@
 import streamlit as st
-from database import export_to_csv, create_tables
-from branding import inject_branding, sidebar_brand
+import pandas as pd
+from database import export_search_to_csv, create_tables
+from branding import inject_branding, sidebar_brand, tier_summary
 
 st.set_page_config(page_title="Export | Veteran Business Directory", page_icon="🎖️", layout="wide")
 create_tables()
@@ -11,16 +12,28 @@ with st.sidebar:
 
 st.title("📤 Export Data")
 
-st.markdown("Download all businesses as a CSV file.")
+st.markdown("Download all businesses as a CSV file with data source tier info.")
 
 if st.button("Generate CSV"):
-    export_path = "/tmp/veteran_businesses_export.csv"
-    count = export_to_csv(export_path)
+    rows = export_search_to_csv()
+    for row in rows:
+        row["data_sources"] = tier_summary(row)
 
-    with open(export_path, "rb") as f:
-        st.download_button(
-            label=f"Download CSV ({count} businesses)",
-            data=f,
-            file_name="veteran_businesses_export.csv",
-            mime="text/csv",
-        )
+    df = pd.DataFrame(rows)
+    export_cols = [
+        c for c in [
+            "legal_business_name", "dba_name", "business_type",
+            "physical_address_line1", "city", "state", "zip_code",
+            "phone", "email", "website",
+            "naics_codes", "naics_descriptions",
+            "distance_miles", "source", "data_sources", "notes",
+        ] if c in df.columns
+    ]
+    csv_data = df[export_cols].to_csv(index=False)
+
+    st.download_button(
+        label=f"Download CSV ({len(rows)} businesses)",
+        data=csv_data,
+        file_name="veteran_businesses_export.csv",
+        mime="text/csv",
+    )
