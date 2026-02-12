@@ -3,18 +3,14 @@ from datetime import datetime, timedelta
 
 from database import create_tables, get_all_fetch_status, get_last_fetch, get_stats, get_contact_stats
 from config import SAM_GOV_API_KEY, SOURCE_SAM_GOV, SOURCE_USASPENDING
+from branding import inject_branding, sidebar_brand
 
 st.set_page_config(page_title="Fetch Data | Veteran Business Directory", page_icon="🎖️", layout="wide")
 create_tables()
+inject_branding()
 
-# Sidebar branding
 with st.sidebar:
-    st.markdown("""
-    <div style='text-align:center; padding: 0.5rem 0 1rem 0;'>
-        <h2 style='color: #2e86ab; margin-bottom: 0;'>🎖️ Veteran Business Directory</h2>
-        <p style='color: #6c757d; font-size: 0.85rem;'>Active Heroes &bull; Shepherdsville, KY</p>
-    </div>
-    """, unsafe_allow_html=True)
+    sidebar_brand()
 
 if not st.session_state.get("logged_in"):
     st.warning("Please log in from the Dashboard sidebar to access this page.")

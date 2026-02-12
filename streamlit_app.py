@@ -5,6 +5,7 @@ from streamlit_folium import st_folium
 from database import create_tables, get_stats, get_contact_stats, get_map_data, get_all_businesses_with_coords, get_all_fetch_status
 from geo import zip_to_coords, filter_by_custom_radius
 from config import ACTIVE_HEROES_LAT, ACTIVE_HEROES_LON
+from branding import inject_branding, sidebar_brand, render_tier_legend_html, BRAND_BLUE
 
 st.set_page_config(
     page_title="Veteran Business Directory | Active Heroes",
@@ -12,34 +13,7 @@ st.set_page_config(
     layout="wide",
 )
 
-# Custom CSS
-st.markdown("""
-<style>
-    [data-testid="stMetricValue"] { font-size: 1.8rem; font-weight: 700; }
-    [data-testid="stMetricLabel"] { font-size: 0.9rem; color: #5a6c7d; }
-    .hero-header {
-        background: linear-gradient(135deg, #2e86ab 0%, #1b4965 100%);
-        color: white;
-        padding: 2rem 2.5rem;
-        border-radius: 1rem;
-        margin-bottom: 1.5rem;
-    }
-    .hero-header h1 {
-        color: #ffffff !important;
-        margin-bottom: 0.25rem;
-        font-size: 2rem;
-    }
-    .hero-header p { color: #d4e8f0; margin: 0; font-size: 1.05rem; }
-    .sidebar-brand h2 { color: #2e86ab; margin-bottom: 0; }
-    .sidebar-brand p { color: #7a8a99; font-size: 0.85rem; }
-    div[data-testid="stMetric"] {
-        background: white;
-        border: 1px solid #e8e0d4;
-        border-radius: 0.75rem;
-        padding: 1rem;
-    }
-</style>
-""", unsafe_allow_html=True)
+inject_branding()
 
 create_tables()
 
@@ -53,12 +27,7 @@ if "selected_businesses" not in st.session_state:
 
 # --- Sidebar ---
 with st.sidebar:
-    st.markdown("""
-    <div class='sidebar-brand' style='text-align:center; padding: 0.5rem 0 1rem 0;'>
-        <h2>🎖️ Veteran Business Directory</h2>
-        <p>Active Heroes &bull; Shepherdsville, KY</p>
-    </div>
-    """, unsafe_allow_html=True)
+    sidebar_brand()
     st.divider()
 
     if st.session_state.logged_in:
@@ -89,7 +58,7 @@ with st.sidebar:
 st.markdown("""
 <div class="hero-header">
     <h1>Veteran Business Directory</h1>
-    <p>Connecting veteran-owned businesses near Active Heroes, Shepherdsville KY</p>
+    <p>Built for Active Heroes &bull; Connecting veteran-owned businesses near Shepherdsville, KY</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -115,10 +84,13 @@ col2.metric("VOB", vob_count)
 col3.metric("SDVOSB", sdvosb_count)
 
 if contact_stats["total"] > 0:
-    pct = round(contact_stats["has_phone"] / contact_stats["total"] * 100)
-    col4.metric("Have Phone", f"{pct}%")
+    has_any_contact = max(contact_stats["has_phone"], contact_stats["has_email"], contact_stats["has_website"])
+    pct = round(has_any_contact / contact_stats["total"] * 100)
+    col4.metric("Have Contact Info", f"{pct}%")
 
-st.markdown("")  # spacer
+# --- Trust Tier Legend ---
+st.subheader("Data Trust Tiers")
+st.markdown(render_tier_legend_html(), unsafe_allow_html=True)
 
 # --- Map Hero Section ---
 st.subheader("Business Locations")
@@ -207,7 +179,7 @@ if data:
     for biz in data:
         bt = biz.get("business_type") or ""
         is_sdvosb = "Service Disabled" in bt
-        color = "#2e86ab" if is_sdvosb else "#27ae60"
+        color = BRAND_BLUE if is_sdvosb else "#27ae60"
         type_label = "SDVOSB" if is_sdvosb else "VOB"
 
         name = biz["legal_business_name"]
@@ -233,8 +205,8 @@ if data:
         if biz.get("email"):
             popup_lines.append(f"✉️ {biz['email']}")
         if biz.get("website"):
-            popup_lines.append(f'🌐 <a href="{biz["website"]}" target="_blank" style="color: #2e86ab;">{biz["website"]}</a>')
-        popup_lines.append("<br><b style='color: #2e86ab; cursor: pointer;'>Click marker again to view full details →</b>")
+            popup_lines.append(f'🌐 <a href="{biz["website"]}" target="_blank" style="color: #2ea3f2;">{biz["website"]}</a>')
+        popup_lines.append("<br><b style='color: #2ea3f2; cursor: pointer;'>Click marker again to view full details →</b>")
         popup_lines.append("</div>")
 
         popup_html = "<br>".join(popup_lines)

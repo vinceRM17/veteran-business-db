@@ -3,18 +3,14 @@ import pandas as pd
 import io
 from database import get_businesses_by_ids, create_tables
 from geo import compute_distances_from_point
+from branding import inject_branding, sidebar_brand, BRAND_BLUE
 
 st.set_page_config(page_title="Report | Veteran Business Directory", page_icon="🎖️", layout="wide")
 create_tables()
+inject_branding()
 
-# Sidebar branding
 with st.sidebar:
-    st.markdown("""
-    <div style='text-align:center; padding: 0.5rem 0 1rem 0;'>
-        <h2 style='color: #2e86ab; margin-bottom: 0;'>🎖️ Veteran Business Directory</h2>
-        <p style='color: #6c757d; font-size: 0.85rem;'>Active Heroes &bull; Shepherdsville, KY</p>
-    </div>
-    """, unsafe_allow_html=True)
+    sidebar_brand()
 
 # Selection state
 if "selected_businesses" not in st.session_state:
@@ -85,7 +81,7 @@ if action_cols[2].button("Print Report"):
     for _, row in df.iterrows():
         cells = "".join(f"<td style='padding:6px 8px;border:1px solid #dee2e6;font-size:12px;'>{v if pd.notna(v) else ''}</td>" for v in row)
         rows_html += f"<tr>{cells}</tr>"
-    headers_html = "".join(f"<th style='padding:6px 8px;border:1px solid #dee2e6;background:#2e86ab;color:white;font-size:12px;'>{h}</th>" for h in display_headers)
+    headers_html = "".join(f"<th style='padding:6px 8px;border:1px solid #dee2e6;background:#2ea3f2;color:white;font-size:12px;'>{h}</th>" for h in display_headers)
 
     print_html = f"""
     <html><head><title>Veteran Business Report</title></head>
@@ -119,7 +115,7 @@ st.divider()
 for biz in businesses:
     bt = biz.get("business_type") or ""
     is_sdvosb = "Service Disabled" in bt
-    border_color = "#2e86ab" if is_sdvosb else "#27ae60" if bt else "#dee2e6"
+    border_color = BRAND_BLUE if is_sdvosb else "#27ae60" if bt else "#dee2e6"
 
     with st.container(border=True):
         st.markdown(

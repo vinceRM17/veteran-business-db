@@ -2,18 +2,14 @@ import streamlit as st
 import pandas as pd
 from database import search_businesses, export_search_to_csv, get_all_states, get_all_business_types, get_all_businesses_with_coords, create_tables
 from geo import zip_to_coords, filter_by_custom_radius
+from branding import inject_branding, sidebar_brand, BRAND_BLUE
 
 st.set_page_config(page_title="Search | Veteran Business Directory", page_icon="🎖️", layout="wide")
 create_tables()
+inject_branding()
 
-# Sidebar branding
 with st.sidebar:
-    st.markdown("""
-    <div style='text-align:center; padding: 0.5rem 0 1rem 0;'>
-        <h2 style='color: #2e86ab; margin-bottom: 0;'>🎖️ Veteran Business Directory</h2>
-        <p style='color: #6c757d; font-size: 0.85rem;'>Active Heroes &bull; Shepherdsville, KY</p>
-    </div>
-    """, unsafe_allow_html=True)
+    sidebar_brand()
 
 # --- Selection state (shared across pages) ---
 if "selected_businesses" not in st.session_state:
@@ -192,7 +188,7 @@ if results["total"] > 0:
 for biz in results["businesses"]:
     bt = biz.get("business_type") or ""
     is_sdvosb = "Service Disabled" in bt
-    border_color = "#2e86ab" if is_sdvosb else "#27ae60" if bt else "#dee2e6"
+    border_color = BRAND_BLUE if is_sdvosb else "#27ae60" if bt else "#dee2e6"
 
     with st.container(border=True):
         # Colored accent bar

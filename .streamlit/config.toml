@@ -1,12 +1,9 @@
-[ui]
-hideSidebarNav = false
-
 [client]
 toolbarMode = "minimal"
 
 [theme]
-primaryColor = "#2e86ab"
-backgroundColor = "#fafaf8"
-secondaryBackgroundColor = "#f0ebe3"
-textColor = "#2c3e50"
+primaryColor = "#2ea3f2"
+backgroundColor = "#f7f8fa"
+secondaryBackgroundColor = "#edf1f5"
+textColor = "#333333"
 font = "sans serif"
