@@ -5,6 +5,8 @@ from geo import zip_to_coords, filter_by_custom_radius
 from branding import (
     inject_branding, sidebar_brand, BRAND_BLUE, TRUST_TIERS, tier_has_data, tier_summary,
     confidence_badge_html, confidence_meter_html, compute_confidence_score,
+    assign_confidence_grade, grade_badge_html, grade_badge_with_score_html,
+    render_confidence_breakdown, GRADE_OPTIONS, GRADE_INFO,
 )
 
 st.set_page_config(page_title="Search | Veteran Business Directory", page_icon="🎖️", layout="wide")
@@ -40,15 +42,25 @@ if sel_count > 0:
         st.session_state.selected_businesses = set()
         st.rerun()
 
-# Tier filter
-tier_options = {info["label"]: key for key, info in TRUST_TIERS.items()}
-required_tiers = st.multiselect(
-    "Must have data from",
-    options=list(tier_options.keys()),
+# Grade filter
+grade_filter = st.multiselect(
+    "Filter by Data Quality Grade",
+    options=GRADE_OPTIONS,
     default=[],
-    key="search_tier_filter",
+    key="search_grade_filter",
 )
-_required_tier_keys = [tier_options[label] for label in required_tiers]
+_required_grades = [g.split(" - ")[0] for g in grade_filter]
+
+# Advanced: Tier filter
+with st.expander("Advanced Filters"):
+    tier_options = {info["label"]: key for key, info in TRUST_TIERS.items()}
+    required_tiers = st.multiselect(
+        "Must have data from tier",
+        options=list(tier_options.keys()),
+        default=[],
+        key="search_tier_filter",
+    )
+    _required_tier_keys = [tier_options[label] for label in required_tiers]
 
 # Filters
 col1, col2, col3, col4, col5 = st.columns([3, 1, 1, 1, 1])
@@ -125,14 +137,15 @@ if custom_location and custom_origin_lat is not None:
                     q_lower in (b.get("legal_business_name") or "").lower() or
                     q_lower in (b.get("dba_name") or "").lower() or
                     q_lower in (b.get("naics_descriptions") or "").lower() or
-                    q_lower in (b.get("city") or "").lower() or
-                    q_lower in (b.get("owner_name") or "").lower()]
+                    q_lower in (b.get("city") or "").lower()]
     if state:
         filtered = [b for b in filtered if b.get("state") == state]
     if biz_type:
         filtered = [b for b in filtered if b.get("business_type") == biz_type]
     if _required_tier_keys:
         filtered = [b for b in filtered if all(tier_has_data(b, tk) for tk in _required_tier_keys)]
+    if _required_grades:
+        filtered = [b for b in filtered if assign_confidence_grade(b)["grade"] in _required_grades]
 
     # Apply custom radius filter
     filtered = filter_by_custom_radius(custom_origin_lat, custom_origin_lon, filtered, custom_radius)
@@ -184,6 +197,13 @@ else:
             if all(tier_has_data(b, tk) for tk in _required_tier_keys)
         ]
         results["total"] = len(results["businesses"])
+    # Apply grade filter post-query
+    if _required_grades:
+        results["businesses"] = [
+            b for b in results["businesses"]
+            if assign_confidence_grade(b)["grade"] in _required_grades
+        ]
+        results["total"] = len(results["businesses"])
     # Re-sort by confidence in Python if selected
     if sort_by == "confidence":
         results["businesses"].sort(
@@ -209,20 +229,20 @@ if results["total"] > 0:
             max_distance=max_distance,
         )
 
-    # Add tier summary to export rows
+    # Add tier summary and grade to export rows
     for row in export_rows:
         row["data_sources"] = tier_summary(row)
+        row["confidence_grade"] = assign_confidence_grade(row)["grade"]
 
     export_df = pd.DataFrame(export_rows)
     # Keep useful columns in a clean order
     export_cols = [
         c for c in [
             "legal_business_name", "dba_name", "business_type",
-            "owner_name", "service_branch", "linkedin_url",
             "physical_address_line1", "city", "state", "zip_code",
             "phone", "email", "website",
             "naics_codes", "naics_descriptions",
-            "distance_miles", "source", "data_sources", "notes",
+            "distance_miles", "confidence_grade", "source", "data_sources", "notes",
         ] if c in export_df.columns
     ]
     if custom_location and "custom_distance_miles" in export_df.columns:
@@ -241,16 +261,17 @@ if results["total"] > 0:
 for biz in results["businesses"]:
     bt = biz.get("business_type") or ""
     is_sdvosb = "Service Disabled" in bt
-    border_color = BRAND_BLUE if is_sdvosb else "#27ae60" if bt else "#dee2e6"
+    biz_grade = assign_confidence_grade(biz)
+    border_color = biz_grade["color"]
 
     with st.container(border=True):
-        # Colored accent bar
+        # Colored accent bar (grade-colored)
         st.markdown(
             f'<div style="border-top: 3px solid {border_color}; margin: -1rem -1rem 0.75rem -1rem;"></div>',
             unsafe_allow_html=True,
         )
 
-        cols = st.columns([0.3, 0.5, 3, 1.5, 0.8, 1, 1.5])
+        cols = st.columns([0.3, 0.5, 3, 1.5, 0.5, 0.8, 1, 1.5])
 
         # Checkbox for selection (on_change fires before rerun so count stays accurate)
         is_selected = biz["id"] in st.session_state.selected_businesses
@@ -270,38 +291,42 @@ for biz in results["businesses"]:
             st.switch_page("pages/_Business_Detail.py")
         if biz.get("dba_name"):
             cols[2].caption(f"DBA: {biz['dba_name']}")
-        if biz.get("owner_name"):
-            cols[2].caption(f"Owner: {biz['owner_name']}")
 
         location = f"{biz.get('city', '')}, {biz.get('state', '')} {biz.get('zip_code', '')}"
         cols[3].text(location)
 
-        # Confidence badge + meter
+        # Grade badge
         cols[4].markdown(
+            grade_badge_html(biz_grade["grade"], show_label=False),
+            unsafe_allow_html=True,
+        )
+
+        # Confidence badge + meter
+        cols[5].markdown(
             confidence_badge_html(biz) + "<br>" + confidence_meter_html(biz),
             unsafe_allow_html=True,
         )
 
         if is_sdvosb:
-            cols[5].markdown(":blue[**SDVOSB**]")
+            cols[6].markdown(":blue[**SDVOSB**]")
         elif bt:
-            cols[5].markdown(":green[**VOB**]")
+            cols[6].markdown(":green[**VOB**]")
 
-        # Contact info - color-coded blue for web-discovered origin
+        # Contact info
         contact_parts = []
         if biz.get("phone"):
             contact_parts.append(
-                f'<span style="color:#2ea3f2;" title="Web-discovered">📞 {biz["phone"]}</span>'
+                f'<span style="color:#3182CE;" title="Web-discovered">📞 {biz["phone"]}</span>'
             )
         if biz.get("email"):
             contact_parts.append(
-                '<span style="color:#2ea3f2;" title="Web-discovered">✉️</span>'
+                '<span style="color:#3182CE;" title="Web-discovered">✉️</span>'
             )
         if biz.get("website"):
             contact_parts.append(
-                '<span style="color:#2ea3f2;" title="Web-discovered">🌐</span>'
+                '<span style="color:#3182CE;" title="Web-discovered">🌐</span>'
             )
-        cols[6].markdown(
+        cols[7].markdown(
             " ".join(contact_parts) if contact_parts else "⚠️ No contact",
             unsafe_allow_html=True,
         )

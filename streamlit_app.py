@@ -1,14 +1,21 @@
 import streamlit as st
 import pandas as pd
+import plotly.express as px
 import folium
 from streamlit_folium import st_folium
-from database import create_tables, get_stats, get_contact_stats, get_map_data, get_all_businesses_with_coords, get_all_fetch_status, get_tier_completeness_stats
+from database import (
+    create_tables, get_stats, get_contact_stats, get_map_data,
+    get_all_businesses_with_coords, get_all_fetch_status,
+    get_tier_completeness_stats, get_grade_distribution,
+)
 from geo import zip_to_coords, filter_by_custom_radius
 from config import ACTIVE_HEROES_LAT, ACTIVE_HEROES_LON
 from branding import (
-    inject_branding, sidebar_brand, render_tier_legend_html, BRAND_BLUE, TRUST_TIERS,
-    tier_has_data, confidence_badge_html, render_dashboard_tier_card,
-    compute_confidence_score, CONFIDENCE_GRADES,
+    inject_branding, sidebar_brand, render_tier_legend_html, BRAND_BLUE, NAVY,
+    TRUST_TIERS, tier_has_data, confidence_badge_html,
+    render_dashboard_tier_card, compute_confidence_score, CONFIDENCE_GRADES,
+    assign_confidence_grade, grade_badge_html, metric_card, style_chart,
+    GRADE_CRITERIA, GRADE_INFO, GRADE_OPTIONS, CHART_COLORS,
 )
 
 st.set_page_config(
@@ -58,16 +65,52 @@ with st.sidebar:
         if st.button("View Report", key="sidebar_report"):
             st.switch_page("pages/5_📊_Report.py")
 
-    # Tier filter
+    # --- Grade-based filter ---
     st.divider()
-    tier_options = {info["label"]: key for key, info in TRUST_TIERS.items()}
-    required_tiers = st.multiselect(
-        "Must have data from",
-        options=list(tier_options.keys()),
+    grade_dist = get_grade_distribution()
+    total_biz = sum(grade_dist.values())
+
+    # Grade multiselect
+    grade_filter = st.multiselect(
+        "Filter by Data Quality Grade",
+        options=GRADE_OPTIONS,
         default=[],
-        key="dash_tier_filter",
+        key="dash_grade_filter",
     )
-    _required_tier_keys = [tier_options[label] for label in required_tiers]
+    _required_grades = [g.split(" - ")[0] for g in grade_filter]
+
+    # Grade distribution summary
+    if total_biz > 0:
+        dist_parts = []
+        for gc in GRADE_CRITERIA:
+            g = gc["grade"]
+            cnt = grade_dist.get(g, 0)
+            dist_parts.append(f"**{g}**: {cnt:,}")
+        st.markdown(
+            f'<div style="font-size:0.78rem; line-height:1.6; color:#a0b8cf;">'
+            + " &bull; ".join(dist_parts) + "</div>",
+            unsafe_allow_html=True,
+        )
+
+    # Advanced: Tier filter + numeric confidence (in expander)
+    with st.expander("Advanced Filters"):
+        tier_options = {info["label"]: key for key, info in TRUST_TIERS.items()}
+        required_tiers = st.multiselect(
+            "Must have data from tier",
+            options=list(tier_options.keys()),
+            default=[],
+            key="dash_tier_filter",
+        )
+        _required_tier_keys = [tier_options[label] for label in required_tiers]
+
+    # Sidebar footer
+    st.markdown(
+        '<div style="text-align:center; padding-top:1.5rem; font-size:0.72rem; color:#5a7a96;">'
+        'Built for Active Heroes<br>'
+        'Shepherdsville, KY'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
 # --- Dashboard Header ---
 stats = get_stats()
@@ -113,7 +156,7 @@ if stats["total"] == 0:
     st.warning("Database is empty. Use the **Fetch Data** or **Import CSV** page to load businesses.")
     st.stop()
 
-# --- Stats ---
+# --- KPI Metric Cards ---
 vob_count = 0
 sdvosb_count = 0
 for t, c in stats.get("by_type", {}).items():
@@ -122,15 +165,26 @@ for t, c in stats.get("by_type", {}).items():
     else:
         vob_count += c
 
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Total Businesses", stats["total"])
-col2.metric("VOB", vob_count)
-col3.metric("SDVOSB", sdvosb_count)
-
+has_any_contact = 0
+contact_pct = 0
 if contact_stats["total"] > 0:
     has_any_contact = max(contact_stats["has_phone"], contact_stats["has_email"], contact_stats["has_website"])
-    pct = round(has_any_contact / contact_stats["total"] * 100)
-    col4.metric("Have Contact Info", f"{pct}%")
+    contact_pct = round(has_any_contact / contact_stats["total"] * 100)
+
+# Grade A count
+grade_a_count = grade_dist.get("A", 0)
+
+col1, col2, col3, col4, col5 = st.columns(5)
+with col1:
+    st.markdown(metric_card("Total Businesses", f"{stats['total']:,}", "🏢", NAVY), unsafe_allow_html=True)
+with col2:
+    st.markdown(metric_card("VOB", f"{vob_count:,}", "🎖️", "#2F855A"), unsafe_allow_html=True)
+with col3:
+    st.markdown(metric_card("SDVOSB", f"{sdvosb_count:,}", "🏅", "#2C5282"), unsafe_allow_html=True)
+with col4:
+    st.markdown(metric_card("Have Contact Info", f"{contact_pct}%", "📞", "#D69E2E"), unsafe_allow_html=True)
+with col5:
+    st.markdown(metric_card("Grade A (Verified)", f"{grade_a_count:,}", "✅", "#2F855A"), unsafe_allow_html=True)
 
 # --- Data Quality Overview ---
 st.subheader("Data Quality Overview")
@@ -144,6 +198,26 @@ if tier_stats:
                 render_dashboard_tier_card(tier_key, tier_stats[tier_key]),
                 unsafe_allow_html=True,
             )
+
+# --- Grade Distribution Chart ---
+if total_biz > 0:
+    st.subheader("Confidence Grade Distribution")
+    grade_df = pd.DataFrame([
+        {"Grade": f"{g} - {GRADE_INFO[g]['label']}", "Count": grade_dist.get(g, 0), "Color": GRADE_INFO[g]["color"]}
+        for g in ("A", "B", "C", "D", "F")
+    ])
+    fig_grade = px.bar(
+        grade_df, x="Grade", y="Count",
+        color="Grade",
+        color_discrete_map={
+            f"{g} - {GRADE_INFO[g]['label']}": GRADE_INFO[g]["color"]
+            for g in ("A", "B", "C", "D", "F")
+        },
+        title="Businesses by Data Quality Grade",
+    )
+    fig_grade.update_layout(showlegend=False)
+    style_chart(fig_grade, height=300)
+    st.plotly_chart(fig_grade, use_container_width=True)
 
 # --- Map Hero Section ---
 st.subheader("Business Locations")
@@ -197,6 +271,10 @@ else:
 if _required_tier_keys:
     data = [b for b in data if all(tier_has_data(b, tk) for tk in _required_tier_keys)]
 
+# Apply grade filter
+if _required_grades:
+    data = [b for b in data if assign_confidence_grade(b)["grade"] in _required_grades]
+
 if data:
     m = folium.Map(
         location=[map_center_lat, map_center_lon],
@@ -209,7 +287,7 @@ if data:
         folium.Marker(
             location=[map_center_lat, map_center_lon],
             popup=folium.Popup(
-                f"<div style='font-family: sans-serif;'>"
+                f"<div style='font-family: Inter, sans-serif;'>"
                 f"<b style='font-size: 14px;'>Search Location</b><br>"
                 f"<span style='color: #5a6c7d;'>Zip: {map_custom_zip}</span>"
                 f"</div>",
@@ -222,7 +300,7 @@ if data:
     folium.Marker(
         location=[ACTIVE_HEROES_LAT, ACTIVE_HEROES_LON],
         popup=folium.Popup(
-            "<div style='font-family: sans-serif;'>"
+            "<div style='font-family: Inter, sans-serif;'>"
             "<b style='font-size: 14px;'>Active Heroes HQ</b><br>"
             "<span style='color: #5a6c7d;'>Shepherdsville, KY</span>"
             "</div>",
@@ -236,7 +314,7 @@ if data:
     for biz in data:
         bt = biz.get("business_type") or ""
         is_sdvosb = "Service Disabled" in bt
-        color = BRAND_BLUE if is_sdvosb else "#27ae60"
+        color = "#2C5282" if is_sdvosb else "#2F855A"
         type_label = "SDVOSB" if is_sdvosb else "VOB"
 
         name = biz["legal_business_name"]
@@ -244,11 +322,19 @@ if data:
         dist = biz.get(distance_key)
         lat, lng = biz["latitude"], biz["longitude"]
 
+        # Grade badge for popup
+        biz_grade = assign_confidence_grade(biz)
+        grade_html = (
+            f'<span style="background:{biz_grade["color"]}; color:white; '
+            f'padding:2px 8px; border-radius:8px; font-size:11px; font-weight:700;">'
+            f'{biz_grade["grade"]}</span>'
+        )
+
         # Store mapping for click detection
         coord_to_id[(round(lat, 5), round(lng, 5))] = biz["id"]
 
         popup_lines = [
-            "<div style='font-family: sans-serif; line-height: 1.5;'>",
+            "<div style='font-family: Inter, sans-serif; line-height: 1.5;'>",
             f"<b style='font-size: 14px;'>{name}</b>",
         ]
         if biz.get("dba_name"):
@@ -256,7 +342,7 @@ if data:
         popup_lines.append(f"<span style='color: #5a6c7d;'>{city_state}</span>")
         popup_lines.append(
             f"<span style='background: {color}; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px;'>{type_label}</span>"
-            f" {confidence_badge_html(biz)}"
+            f" {grade_html}"
         )
         if dist is not None:
             popup_lines.append(f"<span style='color: #7a8a99;'>{dist} mi from {distance_from_label}</span>")
@@ -265,8 +351,8 @@ if data:
         if biz.get("email"):
             popup_lines.append(f"✉️ {biz['email']}")
         if biz.get("website"):
-            popup_lines.append(f'🌐 <a href="{biz["website"]}" target="_blank" style="color: #2ea3f2;">{biz["website"]}</a>')
-        popup_lines.append("<br><b style='color: #2ea3f2; cursor: pointer;'>Click marker again to view full details →</b>")
+            popup_lines.append(f'🌐 <a href="{biz["website"]}" target="_blank" style="color: #3182CE;">{biz["website"]}</a>')
+        popup_lines.append("<br><b style='color: #3182CE; cursor: pointer;'>Click marker again to view full details →</b>")
         popup_lines.append("</div>")
 
         popup_html = "<br>".join(popup_lines)
@@ -319,7 +405,7 @@ else:
 
 st.divider()
 
-# --- Charts ---
+# --- Charts (styled with navy palette) ---
 col_left, col_right = st.columns(2)
 
 with col_left:
@@ -328,16 +414,31 @@ with col_left:
         df_state = pd.DataFrame(
             list(stats["by_state"].items()),
             columns=["State", "Count"],
+        ).head(20)
+        fig_state = px.bar(
+            df_state, x="State", y="Count",
+            title="Top States by Business Count",
         )
-        st.bar_chart(df_state.set_index("State"))
+        style_chart(fig_state, height=350)
+        st.plotly_chart(fig_state, use_container_width=True)
 
 with col_right:
     st.subheader("Contact Completeness")
     if contact_stats["total"] > 0:
         t = contact_stats["total"]
-        st.progress(contact_stats["has_phone"] / t, text=f"Phone: {contact_stats['has_phone']}/{t}")
-        st.progress(contact_stats["has_email"] / t, text=f"Email: {contact_stats['has_email']}/{t}")
-        st.progress(contact_stats["has_website"] / t, text=f"Website: {contact_stats['has_website']}/{t}")
+        contact_df = pd.DataFrame([
+            {"Field": "Phone", "Has Data": contact_stats["has_phone"], "Missing": t - contact_stats["has_phone"]},
+            {"Field": "Email", "Has Data": contact_stats["has_email"], "Missing": t - contact_stats["has_email"]},
+            {"Field": "Website", "Has Data": contact_stats["has_website"], "Missing": t - contact_stats["has_website"]},
+        ])
+        fig_contact = px.bar(
+            contact_df, x="Field", y=["Has Data", "Missing"],
+            title="Contact Data Coverage",
+            barmode="stack",
+            color_discrete_map={"Has Data": "#2F855A", "Missing": "#E2E8F0"},
+        )
+        style_chart(fig_contact, height=350)
+        st.plotly_chart(fig_contact, use_container_width=True)
 
 # Distance and source
 col_a, col_b = st.columns(2)
@@ -345,19 +446,35 @@ col_a, col_b = st.columns(2)
 with col_a:
     st.subheader("By Distance from HQ")
     if stats.get("by_distance"):
-        for bracket, count in stats["by_distance"].items():
-            st.text(f"{bracket}: {count}")
+        dist_df = pd.DataFrame(
+            list(stats["by_distance"].items()),
+            columns=["Bracket", "Count"],
+        )
+        fig_dist = px.bar(
+            dist_df, x="Bracket", y="Count",
+            title="Business Distribution by Distance",
+        )
+        style_chart(fig_dist, height=300)
+        st.plotly_chart(fig_dist, use_container_width=True)
     # Show count of businesses without distance data
     total_with_dist = sum(stats.get("by_distance", {}).values())
     no_dist = stats["total"] - total_with_dist
     if no_dist > 0:
-        st.caption(f"{no_dist} businesses without distance data")
+        st.caption(f"{no_dist:,} businesses without distance data")
 
 with col_b:
     st.subheader("Data Sources")
     if stats.get("by_source"):
-        for source, count in stats["by_source"].items():
-            st.text(f"{source}: {count}")
+        source_df = pd.DataFrame(
+            list(stats["by_source"].items()),
+            columns=["Source", "Count"],
+        )
+        fig_source = px.pie(
+            source_df, names="Source", values="Count",
+            title="Records by Data Source",
+        )
+        style_chart(fig_source, height=300)
+        st.plotly_chart(fig_source, use_container_width=True)
 
     # Data freshness
     fetch_statuses = get_all_fetch_status()

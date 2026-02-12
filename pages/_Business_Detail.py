@@ -4,6 +4,8 @@ from branding import (
     inject_branding, sidebar_brand, render_tier_badges_html,
     render_tier_card_html, TRUST_TIERS, BRAND_BLUE,
     render_confidence_banner_html, render_source_badge_html,
+    assign_confidence_grade, grade_badge_html,
+    render_confidence_breakdown, GRADE_INFO,
 )
 
 st.set_page_config(page_title="Business Detail | Veteran Business Directory", page_icon="🎖️", layout="wide")
@@ -35,28 +37,33 @@ is_logged_in = st.session_state.get("logged_in", False)
 if st.button("← Back to Search"):
     st.switch_page("pages/1_🔍_Search.py")
 
-# Header
+# --- Header with Grade Badge ---
+grade_info = assign_confidence_grade(biz)
+
 col_title, col_badge = st.columns([4, 1])
 with col_title:
-    st.title(biz["legal_business_name"])
+    st.markdown(
+        f'<h1 style="margin-bottom:0.25rem;">{biz["legal_business_name"]}</h1>',
+        unsafe_allow_html=True,
+    )
     if biz.get("dba_name"):
         st.caption(f"DBA: {biz['dba_name']}")
-    # Owner, branch, LinkedIn sub-header
-    sub_parts = []
-    if biz.get("owner_name"):
-        sub_parts.append(f"**Owner:** {biz['owner_name']}")
-    if biz.get("service_branch"):
-        sub_parts.append(f"**Branch:** {biz['service_branch']}")
-    if biz.get("linkedin_url"):
-        sub_parts.append(f"[LinkedIn]({biz['linkedin_url']})")
-    if sub_parts:
-        st.markdown(" &nbsp;|&nbsp; ".join(sub_parts))
 with col_badge:
     bt = biz.get("business_type", "")
+    badge_parts = []
     if "Service Disabled" in (bt or ""):
-        st.markdown(":blue[**SDVOSB**]")
+        badge_parts.append(
+            '<span style="background:#2C5282; color:white; padding:4px 12px; '
+            'border-radius:10px; font-size:0.82rem; font-weight:700;">SDVOSB</span>'
+        )
     elif bt:
-        st.markdown(":green[**VOB**]")
+        badge_parts.append(
+            '<span style="background:#2F855A; color:white; padding:4px 12px; '
+            'border-radius:10px; font-size:0.82rem; font-weight:700;">VOB</span>'
+        )
+    badge_parts.append(grade_badge_html(grade_info["grade"]))
+    st.markdown(" ".join(badge_parts), unsafe_allow_html=True)
+
     dist = biz.get("distance_miles")
     if dist is not None:
         st.metric("Distance", f"{dist} mi")
@@ -66,6 +73,10 @@ st.markdown(render_tier_badges_html(biz), unsafe_allow_html=True)
 
 # --- Confidence Banner ---
 st.markdown(render_confidence_banner_html(biz), unsafe_allow_html=True)
+
+# --- Confidence Breakdown Grid (per field group) ---
+st.markdown("##### Data Completeness by Category")
+st.markdown(render_confidence_breakdown(biz), unsafe_allow_html=True)
 
 # --- Tier Cards ---
 col_left, col_right = st.columns(2)
@@ -114,10 +125,6 @@ if is_logged_in:
             email = ec2.text_input("Email", value=biz.get("email") or "")
             website = ec3.text_input("Website", value=biz.get("website") or "")
 
-            eo1, eo2 = st.columns(2)
-            owner_name = eo1.text_input("Owner / Founder", value=biz.get("owner_name") or "")
-            linkedin_url = eo2.text_input("LinkedIn URL", value=biz.get("linkedin_url") or "")
-
             st.markdown("**Business Details**")
             ed1, ed2 = st.columns(2)
             legal_name = ed1.text_input("Legal Business Name", value=biz.get("legal_business_name") or "")
@@ -160,8 +167,6 @@ if is_logged_in:
                     "phone": phone.strip(),
                     "email": email.strip(),
                     "website": website.strip(),
-                    "owner_name": owner_name.strip(),
-                    "linkedin_url": linkedin_url.strip(),
                     "business_type": biz_type,
                     "service_branch": branch,
                     "physical_address_line1": addr1.strip(),
