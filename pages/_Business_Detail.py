@@ -50,63 +50,50 @@ with col_badge:
 if st.button("← Back to Search"):
     st.switch_page("pages/1_🔍_Search.py")
 
-# Tabbed layout
-tab_labels = ["Overview", "Contact", "Registration"]
-if is_logged_in:
-    tab_labels.append("Admin")
+# --- Location & Contact ---
+col_left, col_right = st.columns(2)
 
-tabs = st.tabs(tab_labels)
-
-with tabs[0]:
-    # Location
+with col_left:
     st.subheader("Location")
+    addr = biz.get("physical_address_line1") or ""
+    if biz.get("physical_address_line2"):
+        addr += f"\n{biz['physical_address_line2']}"
+    city_state = f"{biz.get('city', '')}, {biz.get('state', '')} {biz.get('zip_code', '')}"
+    if addr:
+        st.text(addr)
+    st.text(city_state)
+    if biz.get("service_branch"):
+        st.markdown(f"**Service Branch:** {biz['service_branch']}")
+    st.markdown(f"**Source:** {biz.get('source') or 'Unknown'}")
+
+with col_right:
+    st.subheader("Contact")
     c1, c2 = st.columns(2)
-    with c1:
-        addr = biz.get("physical_address_line1") or ""
-        if biz.get("physical_address_line2"):
-            addr += f"\n{biz['physical_address_line2']}"
-        city_state = f"{biz.get('city', '')}, {biz.get('state', '')} {biz.get('zip_code', '')}"
-        if addr:
-            st.text(addr)
-        st.text(city_state)
-    with c2:
-        if biz.get("service_branch"):
-            st.markdown(f"**Service Branch:** {biz['service_branch']}")
-        st.markdown(f"**Source:** {biz.get('source') or 'Unknown'}")
-
-    # NAICS
-    if biz.get("naics_codes") or biz.get("naics_descriptions"):
-        st.divider()
-        st.subheader("Industry / NAICS Codes")
-        if biz.get("naics_descriptions"):
-            st.text(biz["naics_descriptions"])
-        if biz.get("naics_codes"):
-            st.caption(f"NAICS: {biz['naics_codes']}")
-
-with tabs[1]:
-    st.subheader("Contact Information")
-    c1, c2, c3 = st.columns(3)
     with c1:
         st.markdown("**Phone**")
         if biz.get("phone"):
             st.code(biz["phone"], language=None)
         else:
             st.caption("Not listed")
-    with c2:
         st.markdown("**Email**")
         if biz.get("email"):
             st.code(biz["email"], language=None)
         else:
             st.caption("Not listed")
-    with c3:
+    with c2:
         st.markdown("**Website**")
         if biz.get("website"):
             st.markdown(f"[{biz['website']}]({biz['website']})")
         else:
             st.caption("Not listed")
 
-with tabs[2]:
-    st.subheader("Registration Details")
+st.divider()
+
+# --- Registration & Industry ---
+col_reg, col_naics = st.columns(2)
+
+with col_reg:
+    st.subheader("Registration")
     r1, r2 = st.columns(2)
     with r1:
         if biz.get("uei"):
@@ -122,8 +109,16 @@ with tabs[2]:
         if biz.get("registration_expiration"):
             st.markdown(f"**Expires:** {biz['registration_expiration']}")
 
+with col_naics:
+    if biz.get("naics_codes") or biz.get("naics_descriptions"):
+        st.subheader("Industry / NAICS Codes")
+        if biz.get("naics_descriptions"):
+            st.text(biz["naics_descriptions"])
+        if biz.get("naics_codes"):
+            st.caption(f"NAICS: {biz['naics_codes']}")
+
 if is_logged_in:
-    with tabs[3]:
+    st.divider()
         # Notes
         st.subheader("Notes")
         notes = st.text_area("Notes", value=biz.get("notes") or "", key="notes_area")
