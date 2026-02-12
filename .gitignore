@@ -12,3 +12,8 @@ __pycache__/
 /.venv/
 # Other project files
 .planning/
+# Legacy Flask app (replaced by Streamlit)
+app.py
+wsgi.py
+templates/
+static/
