@@ -1,27 +1,42 @@
 import streamlit as st
 import pandas as pd
+import folium
+from streamlit_folium import st_folium
 from database import create_tables, get_stats, get_contact_stats, get_map_data
 from config import ACTIVE_HEROES_LAT, ACTIVE_HEROES_LON
 
 st.set_page_config(
-    page_title="Veteran Business DB - Active Heroes",
-    page_icon="🛡️",
+    page_title="Veteran Business Directory | Active Heroes",
+    page_icon="🎖️",
     layout="wide",
 )
 
-# Custom CSS for branding and card styling
+# Custom CSS
 st.markdown("""
 <style>
-    [data-testid="stMetricValue"] { font-size: 1.8rem; }
+    [data-testid="stMetricValue"] { font-size: 1.8rem; font-weight: 700; }
+    [data-testid="stMetricLabel"] { font-size: 0.9rem; color: #5a6c7d; }
     .hero-header {
-        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+        background: linear-gradient(135deg, #2e86ab 0%, #1b4965 100%);
         color: white;
-        padding: 1.5rem 2rem;
-        border-radius: 0.75rem;
-        margin-bottom: 1rem;
+        padding: 2rem 2.5rem;
+        border-radius: 1rem;
+        margin-bottom: 1.5rem;
     }
-    .hero-header h1 { color: #c59a3e !important; margin-bottom: 0.25rem; }
-    .hero-header p { color: #adb5bd; margin: 0; }
+    .hero-header h1 {
+        color: #ffffff !important;
+        margin-bottom: 0.25rem;
+        font-size: 2rem;
+    }
+    .hero-header p { color: #d4e8f0; margin: 0; font-size: 1.05rem; }
+    .sidebar-brand h2 { color: #2e86ab; margin-bottom: 0; }
+    .sidebar-brand p { color: #7a8a99; font-size: 0.85rem; }
+    div[data-testid="stMetric"] {
+        background: white;
+        border: 1px solid #e8e0d4;
+        border-radius: 0.75rem;
+        padding: 1rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -34,9 +49,9 @@ if "logged_in" not in st.session_state:
 # --- Sidebar ---
 with st.sidebar:
     st.markdown("""
-    <div style='text-align:center; padding: 0.5rem 0 1rem 0;'>
-        <h2 style='color: #c59a3e; margin-bottom: 0;'>🛡️ Veteran Business DB</h2>
-        <p style='color: #6c757d; font-size: 0.85rem;'>Active Heroes &bull; Shepherdsville, KY</p>
+    <div class='sidebar-brand' style='text-align:center; padding: 0.5rem 0 1rem 0;'>
+        <h2>🎖️ Veteran Business Directory</h2>
+        <p>Active Heroes &bull; Shepherdsville, KY</p>
     </div>
     """, unsafe_allow_html=True)
     st.divider()
@@ -60,8 +75,8 @@ with st.sidebar:
 # --- Dashboard Header ---
 st.markdown("""
 <div class="hero-header">
-    <h1>Dashboard</h1>
-    <p>Veteran-owned businesses near Active Heroes, Shepherdsville KY</p>
+    <h1>Veteran Business Directory</h1>
+    <p>Connecting veteran-owned businesses near Active Heroes, Shepherdsville KY</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -71,43 +86,6 @@ contact_stats = get_contact_stats()
 if stats["total"] == 0:
     st.warning("Database is empty. Use the **Fetch Data** or **Import CSV** page to load businesses.")
     st.stop()
-
-# --- Map Hero Section ---
-st.subheader("🗺️ Business Locations")
-dist_filter = st.select_slider(
-    "Distance Filter",
-    options=[25, 50, 75, 100],
-    value=100,
-    format_func=lambda x: f"{x} miles",
-)
-
-data = get_map_data(max_distance=dist_filter)
-
-if data:
-    rows = [{
-        "lat": ACTIVE_HEROES_LAT,
-        "lon": ACTIVE_HEROES_LON,
-        "name": "Active Heroes HQ",
-        "size": 800,
-        "color": "#c59a3e",
-    }]
-    for biz in data:
-        bt = biz.get("business_type", "")
-        color = "#1565c0" if "Service Disabled" in bt else "#2e7d32"
-        rows.append({
-            "lat": biz["latitude"],
-            "lon": biz["longitude"],
-            "name": biz["legal_business_name"],
-            "size": 200,
-            "color": color,
-        })
-    df = pd.DataFrame(rows)
-    st.map(df, latitude="lat", longitude="lon", size="size", color="color")
-    st.caption(f"Showing {len(data)} businesses  |  🟢 VOB  |  🔵 SDVOSB  |  🟡 Active Heroes HQ")
-else:
-    st.info("No businesses with coordinates to display on map.")
-
-st.divider()
 
 # --- Stats ---
 vob_count = 0
@@ -126,6 +104,86 @@ col3.metric("SDVOSB", sdvosb_count)
 if contact_stats["total"] > 0:
     pct = round(contact_stats["has_phone"] / contact_stats["total"] * 100)
     col4.metric("Have Phone", f"{pct}%")
+
+st.markdown("")  # spacer
+
+# --- Map Hero Section ---
+st.subheader("Business Locations")
+dist_filter = st.select_slider(
+    "Distance Filter",
+    options=[25, 50, 75, 100],
+    value=100,
+    format_func=lambda x: f"{x} miles",
+)
+
+data = get_map_data(max_distance=dist_filter)
+
+if data:
+    m = folium.Map(
+        location=[ACTIVE_HEROES_LAT, ACTIVE_HEROES_LON],
+        zoom_start=8,
+        tiles="CartoDB positron",
+    )
+
+    # Active Heroes HQ marker
+    folium.Marker(
+        location=[ACTIVE_HEROES_LAT, ACTIVE_HEROES_LON],
+        popup=folium.Popup(
+            "<div style='font-family: sans-serif;'>"
+            "<b style='font-size: 14px;'>Active Heroes HQ</b><br>"
+            "<span style='color: #5a6c7d;'>Shepherdsville, KY</span>"
+            "</div>",
+            max_width=250,
+        ),
+        icon=folium.Icon(color="darkred", icon="star", prefix="fa"),
+    ).add_to(m)
+
+    # Business markers
+    for biz in data:
+        bt = biz.get("business_type", "")
+        is_sdvosb = "Service Disabled" in bt
+        color = "#2e86ab" if is_sdvosb else "#27ae60"
+        type_label = "SDVOSB" if is_sdvosb else "VOB"
+
+        name = biz["legal_business_name"]
+        city_state = f"{biz.get('city', '')}, {biz.get('state', '')}"
+        dist = biz.get("distance_miles")
+
+        popup_lines = [
+            "<div style='font-family: sans-serif; line-height: 1.5;'>",
+            f"<b style='font-size: 14px;'>{name}</b>",
+        ]
+        if biz.get("dba_name"):
+            popup_lines.append(f"<i style='color: #7a8a99;'>DBA: {biz['dba_name']}</i>")
+        popup_lines.append(f"<span style='color: #5a6c7d;'>{city_state}</span>")
+        popup_lines.append(f"<span style='background: {color}; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px;'>{type_label}</span>")
+        if dist is not None:
+            popup_lines.append(f"<span style='color: #7a8a99;'>{dist} mi from HQ</span>")
+        if biz.get("phone"):
+            popup_lines.append(f"📞 {biz['phone']}")
+        if biz.get("email"):
+            popup_lines.append(f"✉️ {biz['email']}")
+        if biz.get("website"):
+            popup_lines.append(f'🌐 <a href="{biz["website"]}" target="_blank" style="color: #2e86ab;">{biz["website"]}</a>')
+        popup_lines.append("</div>")
+
+        popup_html = "<br>".join(popup_lines)
+
+        folium.CircleMarker(
+            location=[biz["latitude"], biz["longitude"]],
+            radius=7,
+            color=color,
+            fill=True,
+            fill_color=color,
+            fill_opacity=0.7,
+            popup=folium.Popup(popup_html, max_width=300),
+            tooltip=name,
+        ).add_to(m)
+
+    st_folium(m, use_container_width=True, height=500)
+    st.caption(f"Showing {len(data)} businesses  |  🟢 VOB  |  🔵 SDVOSB  |  ⭐ Active Heroes HQ  — click a marker for details")
+else:
+    st.info("No businesses with coordinates to display on map.")
 
 st.divider()
 

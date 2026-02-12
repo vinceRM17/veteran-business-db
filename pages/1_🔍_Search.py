@@ -1,14 +1,14 @@
 import streamlit as st
 from database import search_businesses, get_all_states, get_all_business_types, create_tables
 
-st.set_page_config(page_title="Search - Veteran Business DB", layout="wide")
+st.set_page_config(page_title="Search | Veteran Business Directory", page_icon="🎖️", layout="wide")
 create_tables()
 
 # Sidebar branding
 with st.sidebar:
     st.markdown("""
     <div style='text-align:center; padding: 0.5rem 0 1rem 0;'>
-        <h2 style='color: #c59a3e; margin-bottom: 0;'>🛡️ Veteran Business DB</h2>
+        <h2 style='color: #2e86ab; margin-bottom: 0;'>🎖️ Veteran Business Directory</h2>
         <p style='color: #6c757d; font-size: 0.85rem;'>Active Heroes &bull; Shepherdsville, KY</p>
     </div>
     """, unsafe_allow_html=True)
@@ -47,7 +47,7 @@ st.caption(f"{results['total']} businesses found")
 for biz in results["businesses"]:
     bt = biz.get("business_type", "")
     is_sdvosb = "Service Disabled" in bt
-    border_color = "#1565c0" if is_sdvosb else "#2e7d32" if bt else "#dee2e6"
+    border_color = "#2e86ab" if is_sdvosb else "#27ae60" if bt else "#dee2e6"
 
     with st.container(border=True):
         # Colored accent bar
@@ -65,7 +65,7 @@ for biz in results["businesses"]:
         name = biz["legal_business_name"]
         if cols[1].button(name, key=f"biz_{biz['id']}"):
             st.session_state.selected_business_id = biz["id"]
-            st.switch_page("pages/2_📋_Business_Detail.py")
+            st.switch_page("pages/_Business_Detail.py")
         if biz.get("dba_name"):
             cols[1].caption(f"DBA: {biz['dba_name']}")
 

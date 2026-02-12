@@ -41,7 +41,7 @@ def _fetch_by_state_and_type(state: str, biz_type: str):
             "sbaBusinessTypeDesc": biz_type,
             "registrationStatus": "A",  # Active registrations only
             "page": page,
-            "size": 100,
+            "size": 10,
         }
 
         try:
@@ -61,7 +61,7 @@ def _fetch_by_state_and_type(state: str, biz_type: str):
 
         total_records = data.get("totalRecords", 0)
         if page == 0:
-            total_pages = (total_records // 100) + 1
+            total_pages = min((total_records // 10) + 1, 1000)  # API max 10k records
             print(f"  Found {total_records} records ({total_pages} pages)")
 
         entities = data.get("entityData", [])

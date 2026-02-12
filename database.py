@@ -341,16 +341,18 @@ def get_map_data(max_distance=None):
 
     if max_distance:
         cursor.execute("""
-            SELECT id, legal_business_name, city, state, zip_code,
-                   business_type, distance_miles, latitude, longitude
+            SELECT id, legal_business_name, dba_name, city, state, zip_code,
+                   business_type, distance_miles, latitude, longitude,
+                   phone, email, website
             FROM businesses
             WHERE latitude IS NOT NULL AND longitude IS NOT NULL
               AND distance_miles <= ?
         """, (max_distance,))
     else:
         cursor.execute("""
-            SELECT id, legal_business_name, city, state, zip_code,
-                   business_type, distance_miles, latitude, longitude
+            SELECT id, legal_business_name, dba_name, city, state, zip_code,
+                   business_type, distance_miles, latitude, longitude,
+                   phone, email, website
             FROM businesses
             WHERE latitude IS NOT NULL AND longitude IS NOT NULL
         """)
